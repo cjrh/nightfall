@@ -292,6 +292,10 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
 }
 
 int FfmpegDecoder::probe_video_format(int codec_preference, bool disable_hw) {
+    if (codec_preference == CODEC_FAMILY_RAW) {
+        return VIDEO_FORMAT_MASK_RAW;
+    }
+
     int supported_mask = 0;
     int test_w = 1280;
     int test_h = 720;
@@ -316,18 +320,18 @@ int FfmpegDecoder::probe_video_format(int codec_preference, bool disable_hw) {
         return false;
     };
 
-    bool h264_ok = test_family(CODEC_FAMILY_H264);
-    bool hevc_ok = (codec_preference == CODEC_FAMILY_H265 || codec_preference == 0) && test_family(CODEC_FAMILY_H265);
-    bool av1_ok = (codec_preference == CODEC_FAMILY_AV1 || codec_preference == 0) && test_family(CODEC_FAMILY_AV1);
+    bool h264_ok = (codec_preference == CODEC_FAMILY_AUTO || codec_preference == CODEC_FAMILY_H264) && test_family(CODEC_FAMILY_H264);
+    bool hevc_ok = (codec_preference == CODEC_FAMILY_AUTO || codec_preference == CODEC_FAMILY_H265) && test_family(CODEC_FAMILY_H265);
+    bool av1_ok = (codec_preference == CODEC_FAMILY_AUTO || codec_preference == CODEC_FAMILY_AV1) && test_family(CODEC_FAMILY_AV1);
 
     if (codec_preference == CODEC_FAMILY_AV1 && av1_ok)
         supported_mask |= VIDEO_FORMAT_MASK_AV1;
     else if (codec_preference == CODEC_FAMILY_H265 && hevc_ok)
         supported_mask |= VIDEO_FORMAT_MASK_H265;
-    else if (h264_ok)
+    else if (codec_preference == CODEC_FAMILY_H264 && h264_ok)
         supported_mask |= VIDEO_FORMAT_MASK_H264;
 
-    if (codec_preference == 0) {
+    if (codec_preference == CODEC_FAMILY_AUTO) {
         if (h264_ok) supported_mask |= VIDEO_FORMAT_MASK_H264;
         if (hevc_ok) supported_mask |= VIDEO_FORMAT_MASK_H265;
         if (av1_ok) supported_mask |= VIDEO_FORMAT_MASK_AV1;
@@ -340,6 +344,14 @@ int FfmpegDecoder::probe_video_format(int codec_preference, bool disable_hw) {
 
 int FfmpegDecoder::setup(int video_format, int width, int height, bool disable_hw) {
     cleanup();
+
+    if (video_format & VIDEO_FORMAT_MASK_RAW) {
+        is_raw_decode_active = true;
+        video_width = width;
+        video_height = height;
+        NF_LOG("FfmpegDecoder", "setup: RAW mode %dx%d (no FFmpeg decoder)", width, height);
+        return 0;
+    }
 
     int family = -1;
     if (video_format & VIDEO_FORMAT_MASK_H264) family = CODEC_FAMILY_H264;
@@ -406,6 +418,7 @@ void FfmpegDecoder::cleanup() {
     }
     v_codec = nullptr;
     is_hw_decode_active = false;
+    is_raw_decode_active = false;
 }
 
 AVFrame *FfmpegDecoder::get_sw_frame() {
@@ -421,6 +434,10 @@ bool FfmpegDecoder::is_hw_decode() const {
     return is_hw_decode_active;
 }
 
+bool FfmpegDecoder::is_raw_decode() const {
+    return is_raw_decode_active;
+}
+
 int FfmpegDecoder::get_video_width() const { return video_width; }
 int FfmpegDecoder::get_video_height() const { return video_height; }
 
@@ -430,6 +447,7 @@ void FfmpegDecoder::_bind_methods() {
     ClassDB::bind_method(D_METHOD("cleanup"), &FfmpegDecoder::cleanup);
     ClassDB::bind_method(D_METHOD("get_decoder_name"), &FfmpegDecoder::get_decoder_name);
     ClassDB::bind_method(D_METHOD("is_hw_decode"), &FfmpegDecoder::is_hw_decode);
+    ClassDB::bind_method(D_METHOD("is_raw_decode"), &FfmpegDecoder::is_raw_decode);
     ClassDB::bind_method(D_METHOD("get_video_width"), &FfmpegDecoder::get_video_width);
     ClassDB::bind_method(D_METHOD("get_video_height"), &FfmpegDecoder::get_video_height);
 }

@@ -4,6 +4,7 @@
 #include "audio/audio_renderer.h"
 #include "input/input_bridge.h"
 #include "video/depth_bridge.h"
+#include "video/codec_defs.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -53,7 +54,9 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     if (ret != 0) return ret;
 
     int pix_fmt = AV_PIX_FMT_YUV420P;
-    if (self->decoder_->is_hw_decode()) {
+    if (self->decoder_->is_raw_decode()) {
+        pix_fmt = AV_PIX_FMT_NV12;
+    } else if (self->decoder_->is_hw_decode()) {
         pix_fmt = AV_PIX_FMT_NV12;
     }
 
@@ -275,6 +278,9 @@ AVColorSpace StreamConnection::_resolve_frame_colorspace(AVFrame *frame) const {
 
     AVColorSpace declared = (AVColorSpace)frame->colorspace;
     if (declared == AVCOL_SPC_UNSPECIFIED || declared == AVCOL_SPC_RGB) {
+        if (active_video_format_ & VIDEO_FORMAT_MASK_RAW) {
+            return AVCOL_SPC_BT709;
+        }
         bool is_h264 = (active_video_format_ & VIDEO_FORMAT_MASK_H264) && !(active_video_format_ & (VIDEO_FORMAT_MASK_H265 | VIDEO_FORMAT_MASK_AV1));
 #ifdef __ANDROID__
         if (is_h264) {
@@ -414,6 +420,41 @@ void StreamConnection::_decode_thread_func() {
         }
 
         if (!pkt) continue;
+
+        if (decoder_->is_raw_decode()) {
+            if (pkt->size >= (int)sizeof(RawFrameHeader)) {
+                RawFrameHeader hdr;
+                memcpy(&hdr, pkt->data, sizeof(hdr));
+                if (hdr.magic[0] == 'R' && hdr.magic[1] == 'A' && hdr.magic[2] == 'W' && hdr.magic[3] == 'F') {
+                    int w = hdr.width;
+                    int h = hdr.height;
+                    uint32_t expected_y = (uint32_t)w * h;
+                    uint32_t expected_uv = (uint32_t)w * (h / 2);
+                    if (hdr.y_size == expected_y && hdr.uv_size == expected_uv &&
+                        pkt->size >= (int)(sizeof(RawFrameHeader) + expected_y + expected_uv)) {
+                        frames_decoded_.fetch_add(1);
+
+                        auto decode_done = std::chrono::steady_clock::now();
+                        auto decode_done_us = std::chrono::duration_cast<std::chrono::microseconds>(decode_done.time_since_epoch()).count();
+                        int64_t submit_us = last_submit_time_us_.load();
+                        if (submit_us > 0 && decode_done_us > submit_us) {
+                            last_frame_latency_us_.store((int)(decode_done_us - submit_us));
+                        }
+
+                        if (current_colorspace_ != AVCOL_SPC_BT709) {
+                            current_colorspace_ = AVCOL_SPC_BT709;
+                            current_color_range_ = AVCOL_RANGE_UNSPECIFIED;
+                            uploader_->update_colorspace((int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
+                        }
+
+                        const uint8_t *payload = pkt->data + sizeof(RawFrameHeader);
+                        uploader_->update_from_raw_nv12(w, h, payload, hdr.y_size, hdr.uv_size);
+                    }
+                }
+            }
+            av_packet_free(&pkt);
+            continue;
+        }
 
         {
             AVCodecContext *ctx = decoder_->get_codec_context();
@@ -608,6 +649,32 @@ int StreamConnection::probe_video_format(int codec_preference, bool disable_hw) 
     return decoder_->probe_video_format(codec_preference, disable_hw);
 }
 
+Dictionary StreamConnection::probe_all_video_formats() {
+    Dictionary result;
+    if (!decoder_.is_valid()) {
+        result["h264"] = true;
+        result["hevc"] = false;
+        result["av1"] = false;
+        result["raw"] = true;
+        return result;
+    }
+    int h264_mask = decoder_->probe_video_format(CODEC_FAMILY_H264, false);
+    result["h264"] = (h264_mask & VIDEO_FORMAT_MASK_H264) != 0;
+
+    int hevc_mask = decoder_->probe_video_format(CODEC_FAMILY_H265, false);
+    result["hevc"] = (hevc_mask & VIDEO_FORMAT_MASK_H265) != 0;
+
+    int av1_mask = decoder_->probe_video_format(CODEC_FAMILY_AV1, false);
+    result["av1"] = (av1_mask & VIDEO_FORMAT_MASK_AV1) != 0;
+
+    result["raw"] = true;
+    return result;
+}
+
+int StreamConnection::get_server_codec_mode_support() const {
+    return server_info_.serverCodecModeSupport;
+}
+
 Ref<FfmpegDecoder> StreamConnection::get_decoder() const {
     return decoder_;
 }
@@ -698,6 +765,8 @@ void StreamConnection::_bind_methods() {
     ClassDB::bind_method(D_METHOD("stop"), &StreamConnection::stop);
     ClassDB::bind_method(D_METHOD("is_streaming"), &StreamConnection::is_streaming);
     ClassDB::bind_method(D_METHOD("probe_video_format", "codec_preference", "disable_hw"), &StreamConnection::probe_video_format);
+    ClassDB::bind_method(D_METHOD("probe_all_video_formats"), &StreamConnection::probe_all_video_formats);
+    ClassDB::bind_method(D_METHOD("get_server_codec_mode_support"), &StreamConnection::get_server_codec_mode_support);
     ClassDB::bind_method(D_METHOD("get_decoder"), &StreamConnection::get_decoder);
     ClassDB::bind_method(D_METHOD("get_texture_uploader"), &StreamConnection::get_texture_uploader);
     ClassDB::bind_method(D_METHOD("get_shader_material"), &StreamConnection::get_shader_material);

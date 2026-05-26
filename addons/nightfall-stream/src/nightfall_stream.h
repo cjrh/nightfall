@@ -43,6 +43,8 @@ public:
     void stop_stream();
 
     int probe_video_format(int codec_preference, bool disable_hw);
+    Dictionary probe_all_video_formats();
+    int get_server_codec_mode_support() const;
 
     void set_auto_reconnect(bool enabled);
     bool get_auto_reconnect() const;

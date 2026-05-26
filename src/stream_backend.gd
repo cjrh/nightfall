@@ -186,6 +186,21 @@ func probe_video_format(codec_pref: int, disable_hw: bool) -> int:
 		return _v2.probe_video_format(codec_pref, disable_hw)
 	return 1
 
+func probe_all_video_formats() -> Dictionary:
+	if _v2 and _v2.has_method("probe_all_video_formats"):
+		return _v2.probe_all_video_formats()
+	var result = {}
+	result["h264"] = true
+	result["hevc"] = false
+	result["av1"] = false
+	result["raw"] = true
+	return result
+
+func get_server_codec_mode_support() -> int:
+	if _v2 and _v2.has_method("get_server_codec_mode_support"):
+		return _v2.get_server_codec_mode_support()
+	return 0
+
 func get_shader_material():
 	if _v2:
 		return _v2.get_shader_material()

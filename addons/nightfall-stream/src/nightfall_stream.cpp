@@ -100,6 +100,23 @@ int NightfallStream::probe_video_format(int codec_preference, bool disable_hw) {
     return stream_connection_->probe_video_format(codec_preference, disable_hw);
 }
 
+Dictionary NightfallStream::probe_all_video_formats() {
+    if (!stream_connection_) {
+        Dictionary result;
+        result["h264"] = true;
+        result["hevc"] = false;
+        result["av1"] = false;
+        result["raw"] = true;
+        return result;
+    }
+    return stream_connection_->probe_all_video_formats();
+}
+
+int NightfallStream::get_server_codec_mode_support() const {
+    if (!stream_connection_) return 0;
+    return stream_connection_->get_server_codec_mode_support();
+}
+
 void NightfallStream::set_auto_reconnect(bool enabled) {
     auto_reconnect_ = enabled;
 }
@@ -336,6 +353,8 @@ void NightfallStream::_bind_methods() {
     ClassDB::bind_method(D_METHOD("start_stream", "host", "server_info", "stream_config", "disable_hw"), &NightfallStream::start_stream, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("stop_stream"), &NightfallStream::stop_stream);
     ClassDB::bind_method(D_METHOD("probe_video_format", "codec_preference", "disable_hw"), &NightfallStream::probe_video_format);
+    ClassDB::bind_method(D_METHOD("probe_all_video_formats"), &NightfallStream::probe_all_video_formats);
+    ClassDB::bind_method(D_METHOD("get_server_codec_mode_support"), &NightfallStream::get_server_codec_mode_support);
 
     ClassDB::bind_method(D_METHOD("set_auto_reconnect", "enabled"), &NightfallStream::set_auto_reconnect);
     ClassDB::bind_method(D_METHOD("get_auto_reconnect"), &NightfallStream::get_auto_reconnect);

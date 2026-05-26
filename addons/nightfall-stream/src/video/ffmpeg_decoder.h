@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include "video/codec_defs.h"
 #include <atomic>
 #include <vector>
 
@@ -23,9 +24,11 @@ class FfmpegDecoder : public RefCounted {
 
 public:
     enum CodecFamily {
-        CODEC_FAMILY_H264 = 0,
-        CODEC_FAMILY_H265 = 1,
-        CODEC_FAMILY_AV1 = 2
+        CODEC_FAMILY_AUTO = 0,
+        CODEC_FAMILY_H264 = 1,
+        CODEC_FAMILY_H265 = 2,
+        CODEC_FAMILY_AV1 = 3,
+        CODEC_FAMILY_RAW = 4
     };
 
     struct DecodedFrameInfo {
@@ -48,6 +51,7 @@ public:
 
     String get_decoder_name() const;
     bool is_hw_decode() const;
+    bool is_raw_decode() const;
     int get_video_width() const;
     int get_video_height() const;
 
@@ -64,6 +68,7 @@ private:
     AVBufferRef *hw_device_ctx = nullptr;
     AVPixelFormat hw_pix_fmt = AV_PIX_FMT_NONE;
     bool is_hw_decode_active = false;
+    bool is_raw_decode_active = false;
     int video_width = 0;
     int video_height = 0;
 

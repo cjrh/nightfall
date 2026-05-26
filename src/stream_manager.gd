@@ -43,6 +43,25 @@ func _on_v2_launch_response(response: Dictionary):
 
 	var server_info = {}
 	server_info["server_codec_mode_support"] = response.get("server_codec_mode_support", 0)
+	var scm = response.get("server_codec_mode_support", 0)
+	main._server_codec_support = {
+		"h264": (scm & 0x01) != 0,
+		"hevc": (scm & 0x0300) != 0,
+		"av1": (scm & 0x030000) != 0,
+		"raw": (scm & 0x01000000) != 0,
+	}
+	main._log("[CODEC] Server SCM=0x%x: h264=%s hevc=%s av1=%s raw=%s" % [
+		scm,
+		str(main._server_codec_support.get("h264", false)),
+		str(main._server_codec_support.get("hevc", false)),
+		str(main._server_codec_support.get("av1", false)),
+		str(main._server_codec_support.get("raw", false))])
+	if not main.settings_controller.is_codec_available(main.codec_preference):
+		for i in range(main.codec_labels.size()):
+			if main.settings_controller.is_codec_available(i):
+				main.codec_preference = i
+				main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[i])
+				break
 	server_info["rtsp_session_url"] = response.get("session_url", "")
 	server_info["server_app_version"] = response.get("app_version", "")
 	server_info["server_gfe_version"] = response.get("gfe_version", "")
@@ -60,7 +79,12 @@ func _on_v2_launch_response(response: Dictionary):
 	stream_config["packet_size"] = response.get("packet_size", 1024)
 	stream_config["streaming_remotely"] = response.get("streaming_remotely", 2)
 	stream_config["audio_configuration"] = response.get("audio_configuration", 0x0302CA)
-	stream_config["supported_video_formats"] = _b().probe_video_format(0, false)
+	var codec_pref = main.codec_preference
+	if codec_pref == 3:
+		stream_config["supported_video_formats"] = 0x10000
+	else:
+		var family_map = [1, 2, 3]
+		stream_config["supported_video_formats"] = _b().probe_video_format(family_map[codec_pref], false)
 	stream_config["color_space"] = 1
 	stream_config["color_range"] = 0
 	stream_config["encryption_flags"] = 0xFFFFFFFF

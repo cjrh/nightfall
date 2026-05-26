@@ -252,6 +252,82 @@ void TextureUploader::update_from_frame(AVFrame *frame) {
     }
 }
 
+void TextureUploader::update_from_raw_nv12(int width, int height, const uint8_t *data, uint32_t y_size, uint32_t uv_size) {
+    if (!data || !use_shader_conversion) return;
+
+    const uint8_t *y_data = data;
+    const uint8_t *uv_data = data + y_size;
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+
+    if (rd) {
+        std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
+
+        int y_stride = width;
+        int required_y = y_stride * height;
+        if (rd_texture_buffers[0].size() != required_y)
+            rd_texture_buffers[0].resize(required_y);
+        memcpy(rd_texture_buffers[0].ptrw(), y_data, required_y);
+
+        if (is_nv12) {
+            int uv_stride = width;
+            int required_uv = uv_stride * (height / 2);
+            if (rd_texture_buffers[1].size() != required_uv)
+                rd_texture_buffers[1].resize(required_uv);
+            memcpy(rd_texture_buffers[1].ptrw(), uv_data, required_uv);
+        } else {
+            int uv_w = width / 2;
+            int uv_h = height / 2;
+            int required_u = uv_w * uv_h;
+            int required_v = uv_w * uv_h;
+            if (rd_texture_buffers[1].size() != required_u)
+                rd_texture_buffers[1].resize(required_u);
+            if (rd_texture_buffers[2].size() != required_v)
+                rd_texture_buffers[2].resize(required_v);
+            uint8_t *u_dst = rd_texture_buffers[1].ptrw();
+            uint8_t *v_dst = rd_texture_buffers[2].ptrw();
+            for (int i = 0; i < uv_w * uv_h; i++) {
+                u_dst[i] = uv_data[i * 2];
+                v_dst[i] = uv_data[i * 2 + 1];
+            }
+        }
+
+        pending_gpu_update.store(true);
+        rs->call_on_render_thread(callable_mp(this, &TextureUploader::perform_gpu_update));
+        return;
+    }
+
+    int y_stride = width;
+    if (plane_buffers[0].size() != (int)y_size)
+        plane_buffers[0].resize(y_size);
+    memcpy(plane_buffers[0].ptrw(), y_data, y_size);
+    plane_images[0]->set_data(width, height, false, Image::FORMAT_L8, plane_buffers[0]);
+    rs->texture_2d_update(plane_textures[0]->get_rid(), plane_images[0], 0);
+
+    if (is_nv12) {
+        int uv_h = height / 2;
+        PackedByteArray uv_buf;
+        uv_buf.resize(uv_size);
+        memcpy(uv_buf.ptrw(), uv_data, uv_size);
+        plane_images[1]->set_data(width / 2, uv_h, false, Image::FORMAT_RG8, uv_buf);
+        rs->texture_2d_update(plane_textures[1]->get_rid(), plane_images[1], 0);
+    } else {
+        int uv_w = width / 2;
+        int uv_h = height / 2;
+        PackedByteArray u_buf, v_buf;
+        u_buf.resize(uv_w * uv_h);
+        v_buf.resize(uv_w * uv_h);
+        for (int i = 0; i < uv_w * uv_h; i++) {
+            u_buf.ptrw()[i] = uv_data[i * 2];
+            v_buf.ptrw()[i] = uv_data[i * 2 + 1];
+        }
+        plane_images[1]->set_data(uv_w, uv_h, false, Image::FORMAT_L8, u_buf);
+        rs->texture_2d_update(plane_textures[1]->get_rid(), plane_images[1], 0);
+        plane_images[2]->set_data(uv_w, uv_h, false, Image::FORMAT_L8, v_buf);
+        rs->texture_2d_update(plane_textures[2]->get_rid(), plane_images[2], 0);
+    }
+}
+
 void TextureUploader::perform_gpu_update() {
     if (!rd) return;
     std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));

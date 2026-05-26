@@ -37,6 +37,8 @@ public:
     void stop();
     bool is_streaming() const;
     int probe_video_format(int codec_preference, bool disable_hw);
+    Dictionary probe_all_video_formats();
+    int get_server_codec_mode_support() const;
 
     Ref<FfmpegDecoder> get_decoder() const;
     Ref<TextureUploader> get_texture_uploader() const;

@@ -240,6 +240,8 @@ func build_ui():
 	row1.add_child(main._ui_cursor_btn)
 	main._ui_steady_btn = make_option_btn("Steady", "Low")
 	row1.add_child(main._ui_steady_btn)
+	main._ui_codec_btn = make_option_btn("Codec", "HEVC")
+	row1.add_child(main._ui_codec_btn)
 
 	var gap = Control.new()
 	gap.custom_minimum_size = Vector2(0, 10)
@@ -352,6 +354,7 @@ func build_ui():
 	main._ui_sharpen_btn.button_down.connect(func(): main.settings_controller.cycle_sharpen_mode())
 	main._ui_cursor_btn.button_down.connect(func(): main.settings_controller.cycle_cursor_mode())
 	main._ui_steady_btn.button_down.connect(func(): main.settings_controller.cycle_steady())
+	main._ui_codec_btn.button_down.connect(func(): main.settings_controller.cycle_codec())
 
 	update_host_label()
 

@@ -109,6 +109,27 @@ func cycle_steady():
 	main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[main.pointer_steady])
 	main.state_manager.save_state()
 
+func is_codec_available(idx: int) -> bool:
+	match idx:
+		0: return main._client_codec_support.get("h264", true) and main._server_codec_support.get("h264", true)
+		1: return main._client_codec_support.get("hevc", true) and main._server_codec_support.get("hevc", true)
+		2: return main._client_codec_support.get("av1", true) and main._server_codec_support.get("av1", true)
+		3: return main._server_codec_support.get("raw", true)
+	return false
+
+func cycle_codec():
+	var size = main.codec_labels.size()
+	var next = (main.codec_preference + 1) % size
+	for i in range(size):
+		var idx = (next + i) % size
+		if is_codec_available(idx):
+			main.codec_preference = idx
+			break
+	main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[main.codec_preference])
+	main.state_manager.save_state()
+	if main.is_streaming:
+		_schedule_stream_restart()
+
 func cycle_sharpen_mode():
 	main.sharpen_mode = (main.sharpen_mode + 1) % main.sharpen_labels.size()
 	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[main.sharpen_mode])

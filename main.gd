@@ -103,6 +103,10 @@ var _steady_hit: Vector3 = Vector3.ZERO
 var _steady_active: bool = false
 var _steady_factor: float = 0.3
 var _steady_dead_zone: float = 0.002
+var codec_preference: int = 2
+var codec_labels: Array = ["H.264", "HEVC", "AV1", "Raw"]
+var _client_codec_support: Dictionary = {}
+var _server_codec_support: Dictionary = {}
 var corner_handles: Array = []
 var grabbed_corner_idx: int = -1
 var corner_anchor_world: Vector3 = Vector3.ZERO
@@ -165,6 +169,7 @@ var _ui_render_btn: Button
 var _ui_sharpen_btn: Button
 var _ui_cursor_btn: Button
 var _ui_steady_btn: Button
+var _ui_codec_btn: Button
 var _ui_exit_btn: Button
 var _ui_disconnect_btn: Button
 var _ui_close_btn: Button
@@ -1014,6 +1019,12 @@ func _ready():
 	stream_backend = StreamBackend.new(v2_node)
 	stream_backend.set_config_manager(config_mgr)
 	stream_backend.set_computer_manager(comp_mgr)
+	_client_codec_support = stream_backend.probe_all_video_formats()
+	_log("[CODEC] Client support: h264=%s hevc=%s av1=%s raw=%s" % [
+		str(_client_codec_support.get("h264", false)),
+		str(_client_codec_support.get("hevc", false)),
+		str(_client_codec_support.get("av1", false)),
+		str(_client_codec_support.get("raw", true))])
 	v2_node.pair_completed.connect(func(s, m): stream_manager.on_pair_completed(s, m))
 	v2_node.stream_started.connect(func():
 		_on_stream_started()

@@ -17,6 +17,7 @@ func save_state():
 	save.set_value("screen", "sharpen_mode", main.sharpen_mode)
 	save.set_value("screen", "cursor_mode", main.cursor_mode)
 	save.set_value("screen", "pointer_steady", main.pointer_steady)
+	save.set_value("screen", "codec_preference", main.codec_preference)
 	save.save("user://app_state.cfg")
 	save_host_state()
 
@@ -95,6 +96,7 @@ func load_state():
 		main.pointer_steady = 0
 	else:
 		main.pointer_steady = int(saved_steady)
+	main.codec_preference = save.get_value("screen", "codec_preference", 2)
 	if save.has_section_key("screen", "size_x"):
 		main._mesh_size = Vector2(save.get_value("screen", "size_x"), save.get_value("screen", "size_y"))
 		if main._mesh_size.x > 0.1 and main._mesh_size.y > 0.1:
@@ -113,5 +115,6 @@ func load_state():
 	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[clampi(main.sharpen_mode, 0, main.sharpen_labels.size() - 1)])
 	main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[clampi(main.cursor_mode, 0, main.cursor_labels.size() - 1)])
 	main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[clampi(main.pointer_steady, 0, main.pointer_steady_labels.size() - 1)])
+	main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[clampi(main.codec_preference, 0, main.codec_labels.size() - 1)])
 	main.screen_manager.update_bezel_size()
 	main.settings_controller.apply_filter()
