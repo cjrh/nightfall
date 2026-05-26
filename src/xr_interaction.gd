@@ -19,7 +19,7 @@ func handle_pointer_interaction():
 				is_gripping = main.right_hand.get_float("grip") > 0.2
 		if is_gripping and not main.was_right_clicking and main.right_click_cooldown <= 0.0:
 			if active_raycast.is_colliding() and active_raycast.get_collider().get_parent() == main.screen_mesh:
-				var hit_pos = active_raycast.get_collision_point()
+				var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 				var local_pos = main.screen_mesh.to_local(hit_pos)
 				var ms = main._mesh_size
 				var uv_x = 0.0
@@ -69,7 +69,7 @@ func handle_pointer_interaction():
 	laser.visible = main.is_xr_active
 	var on_screen = false
 	if active_raycast.is_colliding():
-		var hit_point = active_raycast.get_collision_point()
+		var hit_point = main._get_steady_hit(active_raycast.get_collision_point())
 		var _col = active_raycast.get_collider()
 		var _par = _col.get_parent() if _col else null
 		on_screen = (_par == main.screen_mesh)
@@ -82,8 +82,8 @@ func handle_pointer_interaction():
 		else:
 			if main.pointer_cursor:
 				main.pointer_cursor.global_position = hit_point
-				var to_cam = (main.xr_camera.global_position - hit_point).normalized()
-				main.pointer_cursor.look_at(main.pointer_cursor.global_position + to_cam, Vector3.UP)
+				var surf_normal = main._get_cylinder_normal_at(hit_point)
+				main.pointer_cursor.look_at(main.pointer_cursor.global_position + surf_normal, Vector3.UP)
 				main.pointer_cursor.rotate_object_local(Vector3.UP, PI)
 				var face = -main.pointer_cursor.global_transform.basis.z
 				var right = main.pointer_cursor.global_transform.basis.x
@@ -114,7 +114,7 @@ func handle_pointer_interaction():
 				hit_ui = true
 
 		if parent == main.ui_panel_3d or hit_ui:
-			var hit_pos = active_raycast.get_collision_point()
+			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var local_pos = main.ui_panel_3d.to_local(hit_pos)
 			var half_w = main._ui_mesh_size.x / 2.0
 			var half_h = main._ui_mesh_size.y / 2.0
@@ -161,7 +161,7 @@ func handle_pointer_interaction():
 			return
 
 		if main.virtual_keyboard and main.virtual_keyboard.visible and parent == main.virtual_keyboard.mesh_instance:
-			var hit_pos = active_raycast.get_collision_point()
+			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var local_pos = main.virtual_keyboard.mesh_instance.to_local(hit_pos)
 			var half_w = main.virtual_keyboard.mesh_size.x / 2.0
 			var half_h = main.virtual_keyboard.mesh_size.y / 2.0
@@ -200,7 +200,7 @@ func handle_pointer_interaction():
 			return
 
 		elif parent == main.screen_mesh and not main.is_streaming:
-			var hit_pos = active_raycast.get_collision_point()
+			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var local_pos = main.screen_mesh.to_local(hit_pos)
 			var ms = main._mesh_size
 			var uv_x = 0.0
@@ -239,7 +239,7 @@ func handle_pointer_interaction():
 			return
 
 		elif parent == main.screen_mesh and main.is_streaming:
-			var hit_pos = active_raycast.get_collision_point()
+			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var local_pos = main.screen_mesh.to_local(hit_pos)
 			var ms = main._mesh_size
 			var uv_x = 0.0

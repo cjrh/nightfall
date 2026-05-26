@@ -38,6 +38,7 @@ func _on_v2_launch_response(response: Dictionary):
 	if response.get("status", "") != "success":
 		main._log("[STREAM] Launch failed: %s" % response.get("message", "unknown"))
 		main._ui_status_label.text = "Launch failed: " + str(response.get("message", "unknown"))
+		main.welcome_screen.show_welcome_screen("server")
 		return
 
 	var server_info = {}
@@ -112,7 +113,7 @@ func resize_stream_viewport(w: int, h: int):
 	if main.comp_layer and main.comp_layer is OpenXRCompositionLayerQuad:
 		main.comp_layer.set_quad_size(main._mesh_size)
 	main.screen_manager.resize_screen_to_aspect(w, h)
-	if main._xr_render_width > 0:
+	if main._xr_render_width > 0 and main.screen_mesh.material_override is ShaderMaterial:
 		var scale = float(w) / float(main._xr_render_width)
 		main.screen_mesh.material_override.set_shader_parameter("blur_scale", scale)
 	main._log("[STREAM] Viewport resized to %dx%d (blur_scale=%.2f)" % [w, h, float(w) / float(main._xr_render_width) if main._xr_render_width > 0 else 1.0])
@@ -144,23 +145,40 @@ func on_pair_pressed():
 		if str(pin) == "" or str(pin) == "0":
 			main._ui_status_label.text = "Failed to connect to " + ip
 			main._log("[PAIR] FAILED - no pin returned")
+			main.welcome_screen.show_welcome_screen("server")
 			return
 		main._pair_pin = str(pin)
 		main.welcome_screen.show_welcome_screen("pin")
 
 func on_pair_completed(success: bool, _msg: String):
 	main._log("[PAIR] pair_completed: success=%s msg=%s" % [str(success), str(_msg)])
-	main._ui_status_label.text = "Pair " + ("OK" if success else "FAILED: " + str(_msg))
-	if success:
-		main._ui_status_label.text = "Pairing successful, starting stream..."
-		if _b().get_config_manager():
-			_b().get_config_manager().load_config()
-		var ip = main.get_node("%IPInput").text
+	if not success:
+		main._ui_status_label.text = "Pair FAILED: " + str(_msg)
+		main.welcome_screen.show_welcome_screen("server")
+		return
+	main._ui_status_label.text = "Pairing successful, starting stream..."
+	if _b().get_config_manager():
+		_b().get_config_manager().load_config()
+	var ip = main.get_node("%IPInput").text
+	var found = false
+	for h in _b().get_hosts():
+		if h.has("localaddress") and h.localaddress == ip:
+			main.current_host_id = h.id
+			found = true
+			await start_stream(h.id, main._selected_app_id)
+			break
+	if not found:
+		main._log("[PAIR] Host not found after pairing, retrying config load")
+		_b().get_config_manager().load_config()
 		for h in _b().get_hosts():
-			if h.localaddress == ip:
+			if h.has("localaddress") and h.localaddress == ip:
 				main.current_host_id = h.id
+				found = true
 				await start_stream(h.id, main._selected_app_id)
 				break
+	if not found:
+		main._ui_status_label.text = "Pair OK but host not found"
+		main.welcome_screen.show_welcome_screen("server")
 
 var _mdns_result: Array = []
 
@@ -178,7 +196,11 @@ func browse_mdns() -> Array:
 	return _mdns_result
 
 func bind_texture():
-	var stream_tex = main.stream_viewport.get_texture()
+	var stream_tex
+	if main.use_comp_layer and main.comp_viewport:
+		stream_tex = main.comp_viewport.get_texture()
+	else:
+		stream_tex = main.stream_viewport.get_texture()
 	main.detection_target.texture = stream_tex
 	if main.depth_estimator:
 		main.depth_estimator.bind_stream_texture()
