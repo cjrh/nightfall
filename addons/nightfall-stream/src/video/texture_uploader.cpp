@@ -269,6 +269,7 @@ void TextureUploader::perform_gpu_update() {
             rd->texture_update(rd_texture_rid[1], 0, rd_texture_buffers[1]);
         if (!is_nv12 && rd_texture_rid[2].is_valid())
             rd->texture_update(rd_texture_rid[2], 0, rd_texture_buffers[2]);
+        new_frame_available_.store(true);
     }
 }
 
@@ -303,4 +304,9 @@ void TextureUploader::_bind_methods() {
     ClassDB::bind_method(D_METHOD("cleanup"), &TextureUploader::cleanup);
     ClassDB::bind_method(D_METHOD("get_shader_material"), &TextureUploader::get_shader_material);
     ClassDB::bind_method(D_METHOD("perform_gpu_update"), &TextureUploader::perform_gpu_update);
+    ClassDB::bind_method(D_METHOD("consume_new_frame"), &TextureUploader::consume_new_frame);
+}
+
+bool TextureUploader::consume_new_frame() {
+    return new_frame_available_.exchange(false);
 }

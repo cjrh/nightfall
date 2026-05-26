@@ -191,6 +191,13 @@ func get_shader_material():
 		return _v2.get_shader_material()
 	return null
 
+func consume_new_frame() -> bool:
+	if _v2:
+		var uploader = _v2.get_texture_uploader()
+		if uploader:
+			return uploader.consume_new_frame()
+	return false
+
 func browse_mdns(timeout: float) -> Array:
 	if ClassDB.class_exists("MdnsBrowser"):
 		var mdns_browser = ClassDB.instantiate("MdnsBrowser")

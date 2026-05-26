@@ -35,6 +35,7 @@ public:
     void perform_gpu_update();
 
     Ref<ShaderMaterial> get_shader_material() const { return shader_material; }
+    bool consume_new_frame();
 
 protected:
     static void _bind_methods();
@@ -58,6 +59,7 @@ private:
     bool use_shader_conversion = false;
     bool is_nv12 = false;
     std::atomic<bool> pending_gpu_update{false};
+    std::atomic<bool> new_frame_available_{false};
     Ref<Mutex> texture_mutex;
 
     int current_width = 0;

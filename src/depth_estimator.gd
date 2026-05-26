@@ -9,6 +9,7 @@ var enabled: bool = false
 var submit_timer: float = 0.0
 var submit_interval: float = 0.1
 var model_size: int = 256
+var _poll_timer: float = 0.0
 
 var _platform: String
 
@@ -38,14 +39,19 @@ func setup():
 
 	var img = Image.create(model_size, model_size, false, Image.FORMAT_L8)
 	depth_texture = ImageTexture.create_from_image(img)
-	main.screen_mesh.material_override.set_shader_parameter("depth_texture", depth_texture)
+	if main.screen_mesh.material_override is ShaderMaterial:
+		main.screen_mesh.material_override.set_shader_parameter("depth_texture", depth_texture)
 	if main.comp_shader_mat_left:
 		main.comp_shader_mat_left.set_shader_parameter("depth_texture", depth_texture)
 	if main.comp_shader_mat_right:
 		main.comp_shader_mat_right.set_shader_parameter("depth_texture", depth_texture)
 
 func bind_stream_texture():
-	if depth_target and main.stream_viewport:
+	if not depth_target:
+		return
+	if main.use_comp_layer and main.comp_viewport:
+		depth_target.texture = main.comp_viewport.get_texture()
+	elif main.stream_viewport:
 		depth_target.texture = main.stream_viewport.get_texture()
 
 func set_enabled(val: bool):
@@ -68,7 +74,10 @@ func process(delta: float):
 					main.stream_backend.submit_depth_frame(data, model_size, model_size)
 
 	if main.stream_backend.has_method("get_depth_map"):
-		var depth_bytes = main.stream_backend.get_depth_map()
-		if depth_bytes != null and depth_bytes.size() == model_size * model_size:
-			var depth_image = Image.create_from_data(model_size, model_size, false, Image.FORMAT_L8, depth_bytes)
-			depth_texture.update(depth_image)
+		_poll_timer += delta
+		if _poll_timer >= submit_interval:
+			_poll_timer = 0.0
+			var depth_bytes = main.stream_backend.get_depth_map()
+			if depth_bytes != null and depth_bytes.size() == model_size * model_size:
+				var depth_image = Image.create_from_data(model_size, model_size, false, Image.FORMAT_L8, depth_bytes)
+				depth_texture.update(depth_image)
