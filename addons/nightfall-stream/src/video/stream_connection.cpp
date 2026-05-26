@@ -275,9 +275,16 @@ AVColorSpace StreamConnection::_resolve_frame_colorspace(AVFrame *frame) const {
 
     AVColorSpace declared = (AVColorSpace)frame->colorspace;
     if (declared == AVCOL_SPC_UNSPECIFIED || declared == AVCOL_SPC_RGB) {
+        bool is_h264 = (active_video_format_ & VIDEO_FORMAT_MASK_H264) && !(active_video_format_ & (VIDEO_FORMAT_MASK_H265 | VIDEO_FORMAT_MASK_AV1));
 #ifdef __ANDROID__
+        if (is_h264) {
+            return AVCOL_SPC_BT470BG;
+        }
         return (frame->width >= 1280 || frame->height >= 720) ? AVCOL_SPC_BT709 : AVCOL_SPC_BT470BG;
 #else
+        if (is_h264) {
+            return AVCOL_SPC_BT470BG;
+        }
         return (frame->width <= 1024 && frame->height <= 576) ? AVCOL_SPC_BT470BG : AVCOL_SPC_BT709;
 #endif
     }

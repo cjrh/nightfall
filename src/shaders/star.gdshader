@@ -2,7 +2,7 @@ shader_type spatial;
 render_mode unshaded, depth_draw_never, cull_disabled;
 
 void fragment() {
-	vec3 idx3 = fract(CUSTOM.rgb * 13.37);
+	vec3 idx3 = fract(VERTEX * 13.37);
 	float seed = fract(dot(idx3.rg, vec2(12.9898, 78.233)));
 	
 	float color_sel = fract(seed * 4.32);

@@ -58,6 +58,20 @@ ninja -C build/android
 
 ### Linux Build
 
+**You MUST build in an Ubuntu 22.04 container** to target glibc 2.35. Building on a newer host (e.g. Fedora 42 = glibc 2.43) produces a .so that won't load on most distros. `build.sh --linux` and `build.sh --appimage` handle this automatically via `docker-build-linux.sh`.
+
+```bash
+# Automatic (recommended) — uses Docker if .so doesn't exist yet
+./build.sh --appimage
+
+# Manual Docker build
+bash docker-build-linux.sh
+```
+
+`docker-build-linux.sh` builds in an Ubuntu 22.04 container (glibc 2.35) using the `Dockerfile.linux-build` image. It copies the source read-only into the container, builds, and copies the .so back to the host. The Docker image is cached after the first ~5min build.
+
+To build on host without Docker (only if your host glibc ≤ 2.35, or you only target very new distros):
+
 ```bash
 cd <project-root>/addons/nightfall-stream
 
@@ -68,7 +82,7 @@ cmake --preset linux -DCMAKE_BUILD_TYPE=Release
 ninja -C build/linux-release
 ```
 
-This produces `bin/linux/libnightfall-stream.linux.template_release.x86_64.so`. AI 3D / depth estimation is stubbed on Linux.
+Either way, the output is `bin/linux/libnightfall-stream.linux.template_release.x86_64.so` (~29MB stripped). AI 3D / depth estimation is stubbed on Linux.
 
 ## 2. Export the APK
 
@@ -100,7 +114,8 @@ What `build.sh` does:
 8. Optionally installs via ADB
 
 For Linux AppImage (`--appimage`):
-1. Exports PCK via Godot headless (using Android preset workaround)
+1. Builds Linux .so in Ubuntu 22.04 Docker container (glibc 2.35 compat, skips if .so already exists)
+2. Exports PCK via Godot headless (using Android preset workaround)
 2. Assembles Linux binary from release template + PCK
 3. Creates AppDir with binary, PCK, .so files, plugin.gdextension, desktop entry, and icon
 4. Builds AppImage via `appimagetool` (auto-downloaded to `/tmp/`)
