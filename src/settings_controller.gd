@@ -51,7 +51,8 @@ func apply_stereo():
 			main._switch_to_mesh_rendering()
 		elif mode == 0 and not main.use_comp_layer and main.is_streaming:
 			main._switch_to_comp_layer()
-	main.screen_mesh.material_override.set_shader_parameter("stereo_mode", mode)
+	if main.screen_mesh.material_override is ShaderMaterial:
+		main.screen_mesh.material_override.set_shader_parameter("stereo_mode", mode)
 	if main.depth_estimator:
 		main.depth_estimator.set_enabled(mode >= 3)
 		if mode >= 3 and main.depth_estimator.depth_texture:
@@ -102,6 +103,12 @@ func cycle_cursor_mode():
 	main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[main.cursor_mode])
 	main.state_manager.save_state()
 
+func cycle_steady():
+	main.pointer_steady = (main.pointer_steady + 1) % main.pointer_steady_labels.size()
+	main._steady_active = false
+	main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[main.pointer_steady])
+	main.state_manager.save_state()
+
 func cycle_sharpen_mode():
 	main.sharpen_mode = (main.sharpen_mode + 1) % main.sharpen_labels.size()
 	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[main.sharpen_mode])
@@ -115,7 +122,7 @@ func apply_filter():
 	var sharp_val = float(main.sharpen_mode) * 0.5
 	var blur_scale_val = float(main.host_resolution.x) / float(main._xr_render_width) if main._xr_render_width > 0 else 1.0
 	var mat = main.screen_mesh.material_override
-	if mat:
+	if mat and mat is ShaderMaterial:
 		mat.set_shader_parameter("filter_mode", filter_val)
 		mat.set_shader_parameter("sharpen", sharp_val)
 		mat.set_shader_parameter("blur_scale", blur_scale_val)

@@ -82,6 +82,9 @@ var _xr_base_render_scale: float = 1.0
 var _xr_render_width: int = 1680
 var _mesh_size: Vector2 = Vector2(3.2, 1.8)
 var stream_fps: int = 60
+var _cached_filter_mode: int = -1
+var _cached_sharpen: float = -1.0
+var _cached_blur_scale: float = -1.0
 var host_resolution: Vector2i = Vector2i(1920, 1080)
 var resolution_idx: int = 1
 var resolutions: Array = [Vector2i(1280, 720), Vector2i(1920, 1080), Vector2i(2560, 1440), Vector2i(3840, 2160), Vector2i(1600, 1200), Vector2i(3440, 1440)]
@@ -94,6 +97,12 @@ var display_refresh_rate: float = 72.0
 
 var cursor_mode: int = 1
 var cursor_labels: Array = ["Circle", "Pointer"]
+var pointer_steady: int = 1
+var pointer_steady_labels: Array = ["Off", "Low", "High"]
+var _steady_hit: Vector3 = Vector3.ZERO
+var _steady_active: bool = false
+var _steady_factor: float = 0.3
+var _steady_dead_zone: float = 0.002
 var corner_handles: Array = []
 var grabbed_corner_idx: int = -1
 var corner_anchor_world: Vector3 = Vector3.ZERO
@@ -155,6 +164,7 @@ var _ui_wide_btn: Button
 var _ui_render_btn: Button
 var _ui_sharpen_btn: Button
 var _ui_cursor_btn: Button
+var _ui_steady_btn: Button
 var _ui_exit_btn: Button
 var _ui_disconnect_btn: Button
 var _ui_close_btn: Button
@@ -165,11 +175,6 @@ var _btn_hover: StyleBoxFlat
 func _log(msg: String):
 	_log_lines.append(msg)
 	push_warning("NF: %s" % msg)
-	var f = FileAccess.open("user://debug.log", FileAccess.WRITE)
-	if f:
-		for line in _log_lines:
-			f.store_line(line)
-		f.close()
 
 func _flush_log():
 	var f = FileAccess.open("user://debug.log", FileAccess.WRITE)
@@ -201,7 +206,7 @@ func _setup_comp_layer():
 	comp_viewport.transparent_bg = true
 	comp_viewport.size = Vector2i(1920, 1080)
 	_comp_base_size = Vector2i(1920, 1080)
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(comp_viewport)
 
 	comp_bezel_rect = ColorRect.new()
@@ -376,7 +381,10 @@ func _setup_comp_layer():
 	comp_layer = comp_cylinder
 	comp_layer.set_layer_viewport(comp_viewport)
 	comp_layer_available = true
-	_log("[COMP] Composition layer cylinder created")
+	if comp_cylinder.is_natively_supported():
+		_log("[COMP] Composition layer cylinder natively supported")
+	else:
+		_log("[COMP] Composition layer cylinder NOT natively supported (using fallback mesh)")
 
 var _comp_base_size := Vector2i(1920, 1080)
 
@@ -571,6 +579,41 @@ func _restore_kb_material():
 		virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
 		_kb_saved_mat = null
 
+func _get_steady_hit(raw: Vector3) -> Vector3:
+	if pointer_steady == 0 or not is_xr_active:
+		_steady_active = false
+		return raw
+	if not _steady_active:
+		_steady_hit = raw
+		_steady_active = true
+		return raw
+	var factor := 0.3 if pointer_steady == 1 else 0.1
+	var dead_zone := 0.002 if pointer_steady == 1 else 0.005
+	var delta = raw - _steady_hit
+	if delta.length() < dead_zone:
+		return _steady_hit
+	_steady_hit = _steady_hit.lerp(raw, factor)
+	return _steady_hit
+
+func _get_cylinder_normal_at(hit_point: Vector3) -> Vector3:
+	if curvature == 0 or not comp_layer:
+		return -screen_mesh.global_transform.basis.z
+	var screen_forward = -screen_mesh.global_transform.basis.z
+	var view_dist = (screen_mesh.global_position - xr_camera.global_position).length()
+	if view_dist < 0.5:
+		view_dist = 3.0
+	var radius = view_dist * 100.0
+	if curvature == 1:
+		radius = view_dist * 2.0
+	elif curvature == 2:
+		radius = view_dist * 1.0
+	var cyl_center = screen_mesh.global_position - screen_forward * radius
+	var to_hit = hit_point - cyl_center
+	to_hit.y = 0.0
+	if to_hit.length() < 0.001:
+		return screen_forward
+	return to_hit.normalized()
+
 func _update_cursor_layer():
 	if not comp_cursor or not use_comp_layer:
 		if comp_cursor:
@@ -579,11 +622,11 @@ func _update_cursor_layer():
 	var active_raycast = hand_raycast if is_xr_active else mouse_raycast
 	var on_screen = false
 	if active_raycast.is_colliding():
-		var hit_point = active_raycast.get_collision_point()
+		var hit_point = _get_steady_hit(active_raycast.get_collision_point())
 		var col = active_raycast.get_collider()
 		var par = col.get_parent() if col else null
 		on_screen = (par == screen_mesh)
-		var to_cam = (xr_camera.global_position - hit_point).normalized()
+		var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
 		var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
 		var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
 		if cursor_mode == 0:
@@ -591,16 +634,16 @@ func _update_cursor_layer():
 			if circle: circle.visible = true
 			comp_cursor_viewport.size = Vector2i(256, 256)
 			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
-			comp_cursor.global_position = hit_point + to_cam * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+			comp_cursor.global_position = hit_point + surf_normal * 0.002
+			comp_cursor.look_at(comp_cursor.global_position + surf_normal, Vector3.UP)
 			comp_cursor.rotate_object_local(Vector3.UP, PI)
 		elif on_screen:
 			if pointer: pointer.visible = true
 			if circle: circle.visible = false
 			comp_cursor_viewport.size = Vector2i(40, 64)
 			comp_cursor.set_quad_size(Vector2(0.04, 0.064))
-			comp_cursor.global_position = hit_point + to_cam * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+			comp_cursor.global_position = hit_point + surf_normal * 0.002
+			comp_cursor.look_at(comp_cursor.global_position + surf_normal, Vector3.UP)
 			comp_cursor.rotate_object_local(Vector3.UP, PI)
 			var right = comp_cursor.global_transform.basis.x
 			var up = comp_cursor.global_transform.basis.y
@@ -610,8 +653,8 @@ func _update_cursor_layer():
 			if circle: circle.visible = true
 			comp_cursor_viewport.size = Vector2i(256, 256)
 			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
-			comp_cursor.global_position = hit_point + to_cam * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+			comp_cursor.global_position = hit_point + surf_normal * 0.002
+			comp_cursor.look_at(comp_cursor.global_position + surf_normal, Vector3.UP)
 			comp_cursor.rotate_object_local(Vector3.UP, PI)
 		comp_cursor.visible = true
 	else:
@@ -660,7 +703,7 @@ func _bind_yuv_textures():
 	if not mat:
 		_log("[YUV] No shader material from stream backend, using SubViewport path")
 		var stream_tex = stream_viewport.get_texture()
-		if not use_comp_layer:
+		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
 			screen_mesh.material_override.set_shader_parameter("main_texture", stream_tex)
 			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
 		_bind_comp_fallback_texture(stream_tex)
@@ -680,7 +723,7 @@ func _bind_yuv_textures():
 			yuv_mode_val = 2
 		else:
 			yuv_mode_val = 3
-		if not use_comp_layer:
+		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
 			screen_mesh.material_override.set_shader_parameter("tex_y", tex_y)
 			screen_mesh.material_override.set_shader_parameter("tex_u", tex_u)
 			screen_mesh.material_override.set_shader_parameter("tex_v", tex_v)
@@ -691,7 +734,7 @@ func _bind_yuv_textures():
 		_bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode_val, cmt, cr)
 	else:
 		var stream_tex = stream_viewport.get_texture()
-		if not use_comp_layer:
+		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
 			screen_mesh.material_override.set_shader_parameter("main_texture", stream_tex)
 			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
 		_log("[YUV] No Y textures, falling back to SubViewport path")
@@ -727,7 +770,8 @@ func _on_stream_started():
 	welcome_screen.reset_connect_button()
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = true
 	_log("[STREAM] Connection started!")
-	stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	if not use_comp_layer:
+		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	stream_manager.bind_texture()
 	_bind_yuv_textures()
@@ -752,6 +796,7 @@ func _switch_to_comp_layer():
 		_switch_to_stereo_comp_layer()
 		return
 	use_comp_layer = true
+	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if comp_cylinder_left: comp_cylinder_left.visible = false
 	if comp_cylinder_right: comp_cylinder_right.visible = false
 	if comp_viewport_left: comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -779,8 +824,9 @@ func _switch_to_stereo_comp_layer():
 		_log("[COMP] Not available, cannot use stereo comp layer")
 		return
 	use_comp_layer = true
+	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if comp_cylinder: comp_cylinder.visible = false
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var stereo = settings_controller.get_stereo_mode()
 	comp_cylinder_left.visible = true
 	comp_cylinder_right.visible = true
@@ -802,6 +848,7 @@ func _switch_to_stereo_comp_layer():
 
 func _switch_to_mesh_rendering():
 	use_comp_layer = false
+	stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if is_streaming else SubViewport.UPDATE_DISABLED
 	if comp_cylinder: comp_cylinder.visible = false
 	if comp_cylinder_left: comp_cylinder_left.visible = false
 	if comp_cylinder_right: comp_cylinder_right.visible = false
@@ -809,7 +856,7 @@ func _switch_to_mesh_rendering():
 	if comp_kb: comp_kb.visible = false
 	if comp_cursor: comp_cursor.visible = false
 	if comp_viewport:
-		comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	if comp_viewport_left:
 		comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if comp_viewport_right:
@@ -841,20 +888,20 @@ func _on_stream_terminated(msg: String):
 		return
 	if _restarting_stream:
 		is_streaming = false
+		stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		_clear_comp_yuv_textures()
+		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
+			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
+			screen_mesh.material_override.set_shader_parameter("tex_y", null)
+			screen_mesh.material_override.set_shader_parameter("tex_u", null)
+			screen_mesh.material_override.set_shader_parameter("tex_v", null)
 		return
 	is_streaming = false
 	_ui_status_label.text = "Disconnected: " + str(msg)
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = false
 	_log("[STREAM] Connection terminated: %s" % str(msg))
-	stream_manager.teardown_v2_yuv_rect()
-	if not use_comp_layer:
-		_restore_screen_material()
-		screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
-		screen_mesh.material_override.set_shader_parameter("tex_y", null)
-		screen_mesh.material_override.set_shader_parameter("tex_u", null)
-		screen_mesh.material_override.set_shader_parameter("tex_v", null)
+	welcome_screen.show_welcome_screen("server")
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_clear_comp_yuv_textures()
 	comp_shader_mat.set_shader_parameter("main_texture", welcome_viewport.get_texture())
 	comp_shader_mat.set_shader_parameter("yuv_mode", 0)
@@ -864,8 +911,16 @@ func _on_stream_terminated(msg: String):
 	if comp_shader_mat_right:
 		comp_shader_mat_right.set_shader_parameter("main_texture", welcome_viewport.get_texture())
 		comp_shader_mat_right.set_shader_parameter("yuv_mode", 0)
+	if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
+		screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
+		screen_mesh.material_override.set_shader_parameter("tex_y", null)
+		screen_mesh.material_override.set_shader_parameter("tex_u", null)
+		screen_mesh.material_override.set_shader_parameter("tex_v", null)
+	stream_manager.teardown_v2_yuv_rect()
+	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	if comp_layer_available:
 		_switch_to_comp_layer()
+		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	else:
 		if not use_comp_layer:
 			screen_mesh.material_override.set_shader_parameter("main_texture", welcome_viewport.get_texture())
@@ -951,7 +1006,8 @@ func _ready():
 		comp_mgr.set_config_manager(config_mgr)
 	if not ClassDB.class_exists("NightfallStream"):
 		_log("[FATAL] NightfallStream GDExtension failed to load - missing .so or incompatible glibc")
-		get_tree().quit()
+		if not Engine.is_editor_hint():
+			get_tree().quit()
 		return
 	var v2_node = ClassDB.instantiate("NightfallStream")
 	add_child(v2_node)
@@ -973,7 +1029,8 @@ func _ready():
 	var interface = XRServer.find_interface("OpenXR")
 	if not interface or not interface.is_initialized():
 		_log("[XR] OpenXR not available - cannot run without VR runtime")
-		get_tree().quit()
+		if not Engine.is_editor_hint():
+			get_tree().quit()
 		return
 
 	var render_size = interface.get_render_target_size()
@@ -1003,7 +1060,7 @@ func _ready():
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
-	get_viewport().msaa_3d = Viewport.MSAA_2X
+	get_viewport().msaa_3d = Viewport.MSAA_DISABLED
 	_xr_base_render_scale = get_viewport().scaling_3d_scale
 	is_xr_active = true
 	sbs_mode = 0
@@ -1025,7 +1082,7 @@ func _ready():
 		if comp_shader_mat_right:
 			comp_shader_mat_right.set_shader_parameter("main_texture", welcome_viewport.get_texture())
 			comp_shader_mat_right.set_shader_parameter("yuv_mode", 0)
-		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 
 	await get_tree().create_timer(0.5).timeout
 	_reposition_screen_and_ui()
@@ -1047,9 +1104,9 @@ func _ready():
 	ui_visible = false
 	_set_ui_visible(false)
 
+	var saved_ip = ""
 	if config_mgr:
 		config_mgr.load_config()
-		var saved_ip = ""
 		var save = ConfigFile.new()
 		if save.load("user://last_connection.cfg") == OK:
 			saved_ip = save.get_value("connection", "ip", "")
@@ -1064,7 +1121,9 @@ func _ready():
 				welcome_screen.update_welcome_info()
 
 	stream_manager.bind_texture()
-	screen_mesh.material_override.set_shader_parameter("main_texture", welcome_viewport.get_texture())
+	if screen_mesh.material_override is ShaderMaterial:
+		screen_mesh.material_override.set_shader_parameter("main_texture", welcome_viewport.get_texture())
+	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var _wt = welcome_viewport.get_texture()
 
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -1161,30 +1220,14 @@ func _process(delta):
 				need_bind = true
 			if need_bind:
 				_bind_yuv_textures()
-			if smooth_mode > 0 or sharpen_mode > 0:
-				var blur_s = float(host_resolution.x) / float(_xr_render_width) if _xr_render_width > 0 else 1.0
-				if comp_shader_mat:
-					comp_shader_mat.set_shader_parameter("filter_mode", smooth_mode)
-					comp_shader_mat.set_shader_parameter("sharpen", float(sharpen_mode) * 0.5)
-					comp_shader_mat.set_shader_parameter("blur_scale", blur_s)
-				if comp_shader_mat_left:
-					comp_shader_mat_left.set_shader_parameter("filter_mode", smooth_mode)
-					comp_shader_mat_left.set_shader_parameter("sharpen", float(sharpen_mode) * 0.5)
-					comp_shader_mat_left.set_shader_parameter("blur_scale", blur_s)
-				if comp_shader_mat_right:
-					comp_shader_mat_right.set_shader_parameter("filter_mode", smooth_mode)
-					comp_shader_mat_right.set_shader_parameter("sharpen", float(sharpen_mode) * 0.5)
-					comp_shader_mat_right.set_shader_parameter("blur_scale", blur_s)
-			else:
-				if comp_shader_mat:
-					comp_shader_mat.set_shader_parameter("filter_mode", 0)
-					comp_shader_mat.set_shader_parameter("sharpen", 0.0)
-				if comp_shader_mat_left:
-					comp_shader_mat_left.set_shader_parameter("filter_mode", 0)
-					comp_shader_mat_left.set_shader_parameter("sharpen", 0.0)
-				if comp_shader_mat_right:
-					comp_shader_mat_right.set_shader_parameter("filter_mode", 0)
-					comp_shader_mat_right.set_shader_parameter("sharpen", 0.0)
+			var cur_filter = smooth_mode
+			var cur_sharpen = float(sharpen_mode) * 0.5
+			var cur_blur_scale = float(host_resolution.x) / float(_xr_render_width) if _xr_render_width > 0 else 1.0
+			if cur_filter != _cached_filter_mode or cur_sharpen != _cached_sharpen or cur_blur_scale != _cached_blur_scale:
+				_cached_filter_mode = cur_filter
+				_cached_sharpen = cur_sharpen
+				_cached_blur_scale = cur_blur_scale
+				settings_controller.apply_filter()
 		stats_frame_times.append(delta)
 		stats_timer += delta
 		if stats_timer >= 0.5:

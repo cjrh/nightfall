@@ -16,6 +16,7 @@ func save_state():
 	save.set_value("screen", "smooth_mode", main.smooth_mode)
 	save.set_value("screen", "sharpen_mode", main.sharpen_mode)
 	save.set_value("screen", "cursor_mode", main.cursor_mode)
+	save.set_value("screen", "pointer_steady", main.pointer_steady)
 	save.save("user://app_state.cfg")
 	save_host_state()
 
@@ -56,7 +57,8 @@ func load_host_state(ip: String):
 		else:
 			main.sbs_mode = 0
 			main.ai_3d_mode = 1
-	main.screen_mesh.material_override.set_shader_parameter("stereo_mode", main.settings_controller.get_stereo_mode())
+	if main.screen_mesh.material_override is ShaderMaterial:
+		main.screen_mesh.material_override.set_shader_parameter("stereo_mode", main.settings_controller.get_stereo_mode())
 	main.ui_controller.update_option_btn(main._ui_sbs_btn, main.settings_controller.sbs_labels[main.sbs_mode])
 	main.ui_controller.update_option_btn(main._ui_3d_btn, main.settings_controller.ai_3d_labels[main.ai_3d_mode])
 	main.ui_controller.update_3d_btn_state()
@@ -86,6 +88,13 @@ func load_state():
 	main.smooth_mode = save.get_value("screen", "smooth_mode", save.get_value("screen", "render_mode", 0))
 	main.sharpen_mode = save.get_value("screen", "sharpen_mode", 0)
 	main.cursor_mode = save.get_value("screen", "cursor_mode", 1)
+	var saved_steady = save.get_value("screen", "pointer_steady", 1)
+	if saved_steady == true:
+		main.pointer_steady = 1
+	elif saved_steady == false:
+		main.pointer_steady = 0
+	else:
+		main.pointer_steady = int(saved_steady)
 	if save.has_section_key("screen", "size_x"):
 		main._mesh_size = Vector2(save.get_value("screen", "size_x"), save.get_value("screen", "size_y"))
 		if main._mesh_size.x > 0.1 and main._mesh_size.y > 0.1:
@@ -103,5 +112,6 @@ func load_state():
 	main.ui_controller.update_option_btn(main._ui_render_btn, main.smooth_labels[clampi(main.smooth_mode, 0, main.smooth_labels.size() - 1)])
 	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[clampi(main.sharpen_mode, 0, main.sharpen_labels.size() - 1)])
 	main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[clampi(main.cursor_mode, 0, main.cursor_labels.size() - 1)])
+	main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[clampi(main.pointer_steady, 0, main.pointer_steady_labels.size() - 1)])
 	main.screen_manager.update_bezel_size()
 	main.settings_controller.apply_filter()

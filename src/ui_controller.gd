@@ -37,7 +37,8 @@ func on_ai_3d_toggled():
 	main.settings_controller.cycle_ai_3d_mode()
 
 func update_stereo_shader():
-	main.screen_mesh.material_override.set_shader_parameter("stereo_mode", main.settings_controller.get_stereo_mode())
+	if main.screen_mesh.material_override is ShaderMaterial:
+		main.screen_mesh.material_override.set_shader_parameter("stereo_mode", main.settings_controller.get_stereo_mode())
 	update_option_btn(main._ui_sbs_btn, main.settings_controller.sbs_labels[main.sbs_mode])
 	update_option_btn(main._ui_3d_btn, main.settings_controller.ai_3d_labels[main.ai_3d_mode])
 	update_3d_btn_state()
@@ -237,6 +238,8 @@ func build_ui():
 	row1.add_child(main._ui_bezel_btn)
 	main._ui_cursor_btn = make_option_btn("Cursor", "Circle")
 	row1.add_child(main._ui_cursor_btn)
+	main._ui_steady_btn = make_option_btn("Steady", "Low")
+	row1.add_child(main._ui_steady_btn)
 
 	var gap = Control.new()
 	gap.custom_minimum_size = Vector2(0, 10)
@@ -348,6 +351,7 @@ func build_ui():
 	main._ui_render_btn.button_down.connect(func(): main.settings_controller.cycle_smooth_mode())
 	main._ui_sharpen_btn.button_down.connect(func(): main.settings_controller.cycle_sharpen_mode())
 	main._ui_cursor_btn.button_down.connect(func(): main.settings_controller.cycle_cursor_mode())
+	main._ui_steady_btn.button_down.connect(func(): main.settings_controller.cycle_steady())
 
 	update_host_label()
 
