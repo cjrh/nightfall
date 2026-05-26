@@ -658,13 +658,13 @@ Dictionary StreamConnection::probe_all_video_formats() {
         result["raw"] = true;
         return result;
     }
-    int h264_mask = decoder_->probe_video_format(CODEC_FAMILY_H264, false);
+    int h264_mask = decoder_->probe_video_format(FfmpegDecoder::CODEC_FAMILY_H264, false);
     result["h264"] = (h264_mask & VIDEO_FORMAT_MASK_H264) != 0;
 
-    int hevc_mask = decoder_->probe_video_format(CODEC_FAMILY_H265, false);
+    int hevc_mask = decoder_->probe_video_format(FfmpegDecoder::CODEC_FAMILY_H265, false);
     result["hevc"] = (hevc_mask & VIDEO_FORMAT_MASK_H265) != 0;
 
-    int av1_mask = decoder_->probe_video_format(CODEC_FAMILY_AV1, false);
+    int av1_mask = decoder_->probe_video_format(FfmpegDecoder::CODEC_FAMILY_AV1, false);
     result["av1"] = (av1_mask & VIDEO_FORMAT_MASK_AV1) != 0;
 
     result["raw"] = true;
