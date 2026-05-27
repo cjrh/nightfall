@@ -41,12 +41,12 @@ func create_corner_handles():
 		var col = BoxShape3D.new()
 		col.size = Vector3(0.2, 0.2, 0.1)
 		shape.shape = col
-		shape.position = Vector3(0, 0, 0)
+		shape.position = Vector3(0, 0, 0.06)
 		area.add_child(shape)
 		handle.add_child(h_bar)
 		handle.add_child(v_bar)
 		handle.add_child(area)
-		handle.position = Vector3(offsets[i].x * (mesh_size.x + 0.08), offsets[i].y * (mesh_size.y + 0.08), 0)
+		handle.position = Vector3(offsets[i].x * (mesh_size.x + 0.20), offsets[i].y * (mesh_size.y + 0.20), 0)
 		main.screen_mesh.add_child(handle)
 		main.corner_handles.append(handle)
 
@@ -61,20 +61,20 @@ func update_corner_positions():
 		var chord_half = sin(half_angle) * radius
 		var extra = chord_half - mesh_size.x * 0.5
 		if main.curvature == 2:
-			extra += 0.22
+			extra += 0.30
 		else:
-			extra += 0.15
+			extra += 0.22
 		extra_out = extra
-		corner_z = -(cos(half_angle) * radius - radius) - 0.04
+		corner_z = -(cos(half_angle) * radius - radius) - 0.02
 	var offsets = [
 		Vector2(-0.5, 0.5),
 		Vector2(0.5, 0.5),
 		Vector2(-0.5, -0.5),
 		Vector2(0.5, -0.5),
 	]
-	var y_extra = 0.12 if main.curvature > 0 else 0.08
+	var y_extra = 0.20 if main.curvature > 0 else 0.15
 	for i in range(4):
-		var cx = offsets[i].x * (mesh_size.x + 0.08)
+		var cx = offsets[i].x * (mesh_size.x + 0.20)
 		if main.curvature > 0:
 			var radius = 10.0 if main.curvature == 1 else 4.0
 			var half_angle = mesh_size.x / radius * 0.5
@@ -82,7 +82,7 @@ func update_corner_positions():
 			cx = sin(a) * radius
 			cx += -extra_out if offsets[i].x < 0 else extra_out
 		main.corner_handles[i].position = Vector3(cx, offsets[i].y * (mesh_size.y + y_extra), corner_z)
-	main.get_node("%ScreenGrabBar").position.y = -mesh_size.y / 2.0 - 0.08
+	main.get_node("%ScreenGrabBar").position.y = -mesh_size.y / 2.0 - 0.15
 
 func create_bezel():
 	main.bezel_mesh = MeshInstance3D.new()
