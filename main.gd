@@ -622,18 +622,43 @@ func _get_cylinder_normal_at(hit_point: Vector3) -> Vector3:
 func _hit_point_to_uv(hit_point: Vector3) -> Vector2:
 	var ms = _mesh_size
 	var local_pos = screen_mesh.to_local(hit_point)
-	var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
 	var uv_x = 0.0
+	var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
 	if curvature == 0:
 		uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
 	elif use_comp_layer and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
-		var to_hit = hit_point - _comp_cyl_center
+		var cam_pos = xr_camera.global_position
+		var ray_dir = (hit_point - cam_pos).normalized()
 		var screen_right = screen_mesh.global_transform.basis.x
 		var screen_forward = -screen_mesh.global_transform.basis.z
-		var hit_along_right = to_hit.dot(screen_right)
-		var hit_along_fwd = to_hit.dot(screen_forward)
-		var hit_angle = atan2(hit_along_right, hit_along_fwd)
-		uv_x = clampf((hit_angle + _comp_cyl_central_angle * 0.5) / _comp_cyl_central_angle, 0.0, 1.0)
+		var screen_up = screen_mesh.global_transform.basis.y
+		var oc = cam_pos - _comp_cyl_center
+		var oc_right = oc.dot(screen_right)
+		var oc_fwd = oc.dot(screen_forward)
+		var d_right = ray_dir.dot(screen_right)
+		var d_fwd = ray_dir.dot(screen_forward)
+		var a = d_right * d_right + d_fwd * d_fwd
+		var b = 2.0 * (oc_right * d_right + oc_fwd * d_fwd)
+		var c = oc_right * oc_right + oc_fwd * oc_fwd - _comp_cyl_radius * _comp_cyl_radius
+		var disc = b * b - 4.0 * a * c
+		if disc < 0.0:
+			uv_x = 0.5
+		else:
+			var sqrt_disc = sqrt(disc)
+			var t1 = (-b - sqrt_disc) / (2.0 * a)
+			var t2 = (-b + sqrt_disc) / (2.0 * a)
+			var t = t1 if t1 > 0.001 else t2
+			if t > 0.0:
+				var hit_world = cam_pos + ray_dir * t
+				var hit_local = screen_mesh.to_local(hit_world)
+				uv_y = clampf((ms.y * 0.5 - hit_local.y) / ms.y, 0.0, 1.0)
+				var hit_cyl = hit_world - _comp_cyl_center
+				var hit_right = hit_cyl.dot(screen_right)
+				var hit_fwd = hit_cyl.dot(screen_forward)
+				var hit_angle = atan2(hit_right, hit_fwd)
+				uv_x = clampf((hit_angle + _comp_cyl_central_angle * 0.5) / _comp_cyl_central_angle, 0.0, 1.0)
+			else:
+				uv_x = 0.5
 	else:
 		var radius = 10.0 if curvature == 1 else 4.0
 		var total_angle = ms.x / radius
