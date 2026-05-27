@@ -103,7 +103,7 @@ var _steady_hit: Vector3 = Vector3.ZERO
 var _steady_active: bool = false
 var _steady_factor: float = 0.3
 var _steady_dead_zone: float = 0.002
-var codec_preference: int = 2
+var codec_preference: int = 1
 var codec_labels: Array = ["H.264", "HEVC", "AV1", "Raw"]
 var _client_codec_support: Dictionary = {}
 var _server_codec_support: Dictionary = {}
@@ -125,6 +125,9 @@ var state_manager: StateManager
 var host_discovery: HostDiscovery
 
 var comp_cylinder: Node3D = null
+var _comp_cyl_center := Vector3.ZERO
+var _comp_cyl_radius := 0.0
+var _comp_cyl_central_angle := 0.0
 var comp_cursor: Node3D = null
 var comp_ui: Node3D = null
 var comp_kb: Node3D = null
@@ -152,8 +155,8 @@ var _ui_saved_mat: Material = null
 var _kb_saved_mat: Material = null
 
 var _log_lines: PackedStringArray = []
-var _ui_viewport_size := Vector2i(520, 300)
-var _ui_mesh_size := Vector2(1.04, 0.6)
+var _ui_viewport_size := Vector2i(600, 300)
+var _ui_mesh_size := Vector2(1.20, 0.6)
 var _ui_host_label: Label
 var _ui_status_label: Label
 var _ui_pt_btn: Button
@@ -513,12 +516,15 @@ func _update_cylinder_params():
 		view_dist = 3.0
 	var radius = view_dist * 100.0
 	if curvature == 1:
-		radius = view_dist * 2.0
+		radius = view_dist * 3.0
 	elif curvature == 2:
-		radius = view_dist * 1.0
+		radius = view_dist * 2.0
 	var screen_forward = -screen_mesh.global_transform.basis.z
 	var central_angle = _mesh_size.x / radius
 	var aspect = _mesh_size.x / _mesh_size.y
+	_comp_cyl_radius = radius
+	_comp_cyl_central_angle = central_angle
+	_comp_cyl_center = screen_mesh.global_position - screen_forward * radius
 	if comp_cylinder and comp_cylinder.visible:
 		comp_cylinder.set_radius(radius)
 		comp_cylinder.set_central_angle(central_angle)
@@ -604,20 +610,36 @@ func _get_cylinder_normal_at(hit_point: Vector3) -> Vector3:
 	if curvature == 0 or not comp_layer:
 		return -screen_mesh.global_transform.basis.z
 	var screen_forward = -screen_mesh.global_transform.basis.z
-	var view_dist = (screen_mesh.global_position - xr_camera.global_position).length()
-	if view_dist < 0.5:
-		view_dist = 3.0
-	var radius = view_dist * 100.0
-	if curvature == 1:
-		radius = view_dist * 2.0
-	elif curvature == 2:
-		radius = view_dist * 1.0
-	var cyl_center = screen_mesh.global_position - screen_forward * radius
+	if _comp_cyl_radius < 0.01:
+		return screen_forward
+	var cyl_center = screen_mesh.global_position - screen_forward * _comp_cyl_radius
 	var to_hit = hit_point - cyl_center
 	to_hit.y = 0.0
 	if to_hit.length() < 0.001:
 		return screen_forward
 	return to_hit.normalized()
+
+func _hit_point_to_uv(hit_point: Vector3) -> Vector2:
+	var ms = _mesh_size
+	var local_pos = screen_mesh.to_local(hit_point)
+	var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
+	var uv_x = 0.0
+	if curvature == 0:
+		uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
+	elif use_comp_layer and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
+		var to_hit = hit_point - _comp_cyl_center
+		var screen_right = screen_mesh.global_transform.basis.x
+		var screen_forward = -screen_mesh.global_transform.basis.z
+		var hit_along_right = to_hit.dot(screen_right)
+		var hit_along_fwd = to_hit.dot(screen_forward)
+		var hit_angle = atan2(hit_along_right, hit_along_fwd)
+		uv_x = clampf((hit_angle + _comp_cyl_central_angle * 0.5) / _comp_cyl_central_angle, 0.0, 1.0)
+	else:
+		var radius = 10.0 if curvature == 1 else 4.0
+		var total_angle = ms.x / radius
+		var chord = clampf(local_pos.x / radius, -1.0, 1.0)
+		uv_x = clampf((asin(chord) + total_angle * 0.5) / total_angle, 0.0, 1.0)
+	return Vector2(uv_x, uv_y)
 
 func _update_cursor_layer():
 	if not comp_cursor or not use_comp_layer:
@@ -632,6 +654,7 @@ func _update_cursor_layer():
 		var par = col.get_parent() if col else null
 		on_screen = (par == screen_mesh)
 		var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
+		var to_cam = (xr_camera.global_position - hit_point).normalized()
 		var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
 		var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
 		if cursor_mode == 0:
@@ -640,7 +663,7 @@ func _update_cursor_layer():
 			comp_cursor_viewport.size = Vector2i(256, 256)
 			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
 			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + surf_normal, Vector3.UP)
+			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 			comp_cursor.rotate_object_local(Vector3.UP, PI)
 		elif on_screen:
 			if pointer: pointer.visible = true
@@ -648,7 +671,7 @@ func _update_cursor_layer():
 			comp_cursor_viewport.size = Vector2i(40, 64)
 			comp_cursor.set_quad_size(Vector2(0.04, 0.064))
 			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + surf_normal, Vector3.UP)
+			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 			comp_cursor.rotate_object_local(Vector3.UP, PI)
 			var right = comp_cursor.global_transform.basis.x
 			var up = comp_cursor.global_transform.basis.y
@@ -659,7 +682,7 @@ func _update_cursor_layer():
 			comp_cursor_viewport.size = Vector2i(256, 256)
 			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
 			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + surf_normal, Vector3.UP)
+			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 			comp_cursor.rotate_object_local(Vector3.UP, PI)
 		comp_cursor.visible = true
 	else:
@@ -893,6 +916,8 @@ func _on_stream_terminated(msg: String):
 		return
 	if _restarting_stream:
 		is_streaming = false
+		_server_codec_support = {}
+		ui_controller.update_codec_btn()
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		_clear_comp_yuv_textures()
 		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
@@ -902,6 +927,8 @@ func _on_stream_terminated(msg: String):
 			screen_mesh.material_override.set_shader_parameter("tex_v", null)
 		return
 	is_streaming = false
+	_server_codec_support = {}
+	ui_controller.update_codec_btn()
 	_ui_status_label.text = "Disconnected: " + str(msg)
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = false
 	_log("[STREAM] Connection terminated: %s" % str(msg))

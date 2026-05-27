@@ -240,8 +240,6 @@ func build_ui():
 	row1.add_child(main._ui_cursor_btn)
 	main._ui_steady_btn = make_option_btn("Steady", "Low")
 	row1.add_child(main._ui_steady_btn)
-	main._ui_codec_btn = make_option_btn("Codec", "HEVC")
-	row1.add_child(main._ui_codec_btn)
 
 	var gap = Control.new()
 	gap.custom_minimum_size = Vector2(0, 10)
@@ -263,6 +261,8 @@ func build_ui():
 	row2.add_child(main._ui_fps_btn)
 	main._ui_bitrate_btn = make_option_btn("Mbit", "Auto")
 	row2.add_child(main._ui_bitrate_btn)
+	main._ui_codec_btn = make_option_btn("Codec", "HEVC")
+	row2.add_child(main._ui_codec_btn)
 	main._ui_render_btn = make_option_btn("Smooth", "0%")
 	row2.add_child(main._ui_render_btn)
 
@@ -378,6 +378,9 @@ func update_option_btn(btn: Button, value: String):
 	var parts = btn.text.split("\n")
 	if parts.size() >= 2:
 		btn.text = parts[0] + "\n" + value
+
+func update_codec_btn():
+	main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[main.codec_preference])
 
 func update_host_label():
 	if not main.is_streaming:

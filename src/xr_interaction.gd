@@ -20,16 +20,9 @@ func handle_pointer_interaction():
 		if is_gripping and not main.was_right_clicking and main.right_click_cooldown <= 0.0:
 			if active_raycast.is_colliding() and active_raycast.get_collider().get_parent() == main.screen_mesh:
 				var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
-				var local_pos = main.screen_mesh.to_local(hit_pos)
-				var ms = main._mesh_size
-				var uv_x = 0.0
-				var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
-				if main.curvature == 0:
-					uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
-				else:
-					var radius = 10.0 if main.curvature == 1 else 4.0
-					var total_angle = ms.x / radius
-					uv_x = clampf((asin(clampf(local_pos.x / radius, -1.0, 1.0)) + total_angle * 0.5) / total_angle, 0.0, 1.0)
+				var uv = main._hit_point_to_uv(hit_pos)
+				var uv_x = uv.x
+				var uv_y = uv.y
 				if main.settings_controller.get_stereo_mode() >= 3:
 					var shift = _compute_parallax_shift(uv_x)
 					uv_x = clampf(uv_x - shift, 0.0, 1.0)
@@ -82,8 +75,8 @@ func handle_pointer_interaction():
 		else:
 			if main.pointer_cursor:
 				main.pointer_cursor.global_position = hit_point
-				var surf_normal = main._get_cylinder_normal_at(hit_point)
-				main.pointer_cursor.look_at(main.pointer_cursor.global_position + surf_normal, Vector3.UP)
+				var to_cam = (main.xr_camera.global_position - hit_point).normalized()
+				main.pointer_cursor.look_at(main.pointer_cursor.global_position + to_cam, Vector3.UP)
 				main.pointer_cursor.rotate_object_local(Vector3.UP, PI)
 				var face = -main.pointer_cursor.global_transform.basis.z
 				var right = main.pointer_cursor.global_transform.basis.x
@@ -201,18 +194,9 @@ func handle_pointer_interaction():
 
 		elif parent == main.screen_mesh and not main.is_streaming:
 			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
-			var local_pos = main.screen_mesh.to_local(hit_pos)
-			var ms = main._mesh_size
-			var uv_x = 0.0
-			var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
-			if main.curvature == 0:
-				uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
-			else:
-				var radius = 10.0 if main.curvature == 1 else 4.0
-				var total_angle = ms.x / radius
-				uv_x = clampf((asin(clampf(local_pos.x / radius, -1.0, 1.0)) + total_angle * 0.5) / total_angle, 0.0, 1.0)
+			var uv = main._hit_point_to_uv(hit_pos)
 			var wv = main.welcome_viewport
-			var pixel_pos = Vector2(uv_x * wv.size.x, uv_y * wv.size.y)
+			var pixel_pos = Vector2(uv.x * wv.size.x, uv.y * wv.size.y)
 
 			var motion = InputEventMouseMotion.new()
 			motion.position = pixel_pos
@@ -240,16 +224,9 @@ func handle_pointer_interaction():
 
 		elif parent == main.screen_mesh and main.is_streaming:
 			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
-			var local_pos = main.screen_mesh.to_local(hit_pos)
-			var ms = main._mesh_size
-			var uv_x = 0.0
-			var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
-			if main.curvature == 0:
-				uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
-			else:
-				var radius = 10.0 if main.curvature == 1 else 4.0
-				var total_angle = ms.x / radius
-				uv_x = clampf((asin(clampf(local_pos.x / radius, -1.0, 1.0)) + total_angle * 0.5) / total_angle, 0.0, 1.0)
+			var uv = main._hit_point_to_uv(hit_pos)
+			var uv_x = uv.x
+			var uv_y = uv.y
 			if main.settings_controller.get_stereo_mode() >= 3:
 				var shift = _compute_parallax_shift(uv_x)
 				uv_x = clampf(uv_x - shift, 0.0, 1.0)

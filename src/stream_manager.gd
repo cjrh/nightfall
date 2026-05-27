@@ -57,11 +57,8 @@ func _on_v2_launch_response(response: Dictionary):
 		str(main._server_codec_support.get("av1", false)),
 		str(main._server_codec_support.get("raw", false))])
 	if not main.settings_controller.is_codec_available(main.codec_preference):
-		for i in range(main.codec_labels.size()):
-			if main.settings_controller.is_codec_available(i):
-				main.codec_preference = i
-				main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[i])
-				break
+		main.settings_controller.fallback_codec()
+		main.ui_controller.update_codec_btn()
 	server_info["rtsp_session_url"] = response.get("session_url", "")
 	server_info["server_app_version"] = response.get("app_version", "")
 	server_info["server_gfe_version"] = response.get("gfe_version", "")
@@ -273,7 +270,8 @@ func update_stats():
 	var latency_ms = _b().get_last_frame_latency() / 1000.0
 	var bitrate_mbps = bitrate / 1000.0
 	var refresh_hz = main.display_refresh_rate
-	var txt = ip_display + " \u2022 " + str(vw) + "x" + str(vh) + " " + str(main.stream_fps) + "fps " + str(int(bitrate_mbps)) + "Mbps " + hw
+	var codec_name = main.codec_labels[main.codec_preference] if main.codec_preference < main.codec_labels.size() else "?"
+	var txt = ip_display + " \u2022 " + str(vw) + "x" + str(vh) + " " + str(main.stream_fps) + "fps " + str(int(bitrate_mbps)) + "Mbps " + codec_name + " " + hw
 	txt += " \u2022 " + str(int(latency_ms)) + "ms"
 	txt += " \u2022 " + str(int(refresh_hz)) + "Hz \u2022 " + str(int(main.stats_fps)) + "fps"
 	if dropped > 0:

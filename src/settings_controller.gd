@@ -110,25 +110,52 @@ func cycle_steady():
 	main.state_manager.save_state()
 
 func is_codec_available(idx: int) -> bool:
+	var client_ok = false
+	var server_ok = false
 	match idx:
-		0: return main._client_codec_support.get("h264", true) and main._server_codec_support.get("h264", true)
-		1: return main._client_codec_support.get("hevc", true) and main._server_codec_support.get("hevc", true)
-		2: return main._client_codec_support.get("av1", true) and main._server_codec_support.get("av1", true)
-		3: return main._server_codec_support.get("raw", true)
-	return false
+		0:
+			client_ok = main._client_codec_support.get("h264", true)
+			server_ok = main._server_codec_support.get("h264", true)
+		1:
+			client_ok = main._client_codec_support.get("hevc", true)
+			server_ok = main._server_codec_support.get("hevc", true)
+		2:
+			client_ok = main._client_codec_support.get("av1", true)
+			server_ok = main._server_codec_support.get("av1", true)
+		3:
+			client_ok = main._client_codec_support.get("raw", true)
+			server_ok = main._server_codec_support.get("raw", true)
+	if main._server_codec_support.is_empty():
+		return client_ok
+	return client_ok and server_ok
+
+func _get_available_codecs() -> PackedInt32Array:
+	var result = PackedInt32Array()
+	for i in range(main.codec_labels.size()):
+		if is_codec_available(i):
+			result.append(i)
+	return result
 
 func cycle_codec():
-	var size = main.codec_labels.size()
-	var next = (main.codec_preference + 1) % size
-	for i in range(size):
-		var idx = (next + i) % size
-		if is_codec_available(idx):
-			main.codec_preference = idx
-			break
-	main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[main.codec_preference])
+	var available = _get_available_codecs()
+	if available.is_empty():
+		return
+	var cur_pos = available.find(main.codec_preference)
+	if cur_pos >= 0:
+		main.codec_preference = available[(cur_pos + 1) % available.size()]
+	else:
+		main.codec_preference = available[0]
+	main.ui_controller.update_codec_btn()
 	main.state_manager.save_state()
 	if main.is_streaming:
 		_schedule_stream_restart()
+
+func fallback_codec():
+	if is_codec_available(1):
+		main.codec_preference = 1
+	else:
+		var available = _get_available_codecs()
+		main.codec_preference = available[0] if not available.is_empty() else 0
 
 func cycle_sharpen_mode():
 	main.sharpen_mode = (main.sharpen_mode + 1) % main.sharpen_labels.size()
