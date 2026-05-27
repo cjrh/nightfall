@@ -58,6 +58,8 @@ public:
     const AVCodec *get_codec() const { return v_codec; }
     AVCodecContext *get_codec_context() const { return v_codec_ctx; }
 
+    int upgrade_to_mediacodec(const uint8_t *extradata, int extradata_size);
+
     static Vector<String> get_candidate_decoders(int codec_family);
 
 private:

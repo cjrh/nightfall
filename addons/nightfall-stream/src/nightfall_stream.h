@@ -88,6 +88,7 @@ private:
     void _on_stage_failed(const String &stage_name, int error_code);
     void _on_connection_status_update(int status);
     void _on_log_message(const String &message);
+    void _on_h264_hw_upgraded();
 
     void _attempt_reconnect();
     void _reset_reconnect();

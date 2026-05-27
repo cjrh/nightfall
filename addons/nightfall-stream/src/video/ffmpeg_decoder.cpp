@@ -15,7 +15,6 @@ extern "C" JNIEXPORT void JNICALL Java_com_godot_game_GodotApp_initializeMoonlig
     JavaVM *vm = nullptr;
     if (env->GetJavaVM(&vm) == 0) {
         av_jni_set_java_vm(vm, nullptr);
-        NF_LOG("FfmpegDecoder", "JNI: Set JavaVM to %p", vm);
     }
 }
 
@@ -24,12 +23,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_godot_game_GodotApp_setAndroidContext
         jobject global_ref = env->NewGlobalRef(context);
         if (global_ref) {
             av_jni_set_android_app_ctx(global_ref, nullptr);
-            NF_LOG("FfmpegDecoder", "JNI: Set Android app context to %p (global ref)", global_ref);
-        } else {
-            NF_LOGE("FfmpegDecoder", "JNI: Failed to create global ref for app context");
         }
-    } else {
-        NF_LOGE("FfmpegDecoder", "JNI: Android app context is NULL!");
     }
 }
 
@@ -79,76 +73,12 @@ Vector<String> FfmpegDecoder::get_candidate_decoders(int codec_family) {
     else if (codec_family == CODEC_FAMILY_AV1) base_codec_name = "av1";
 
     if (!base_codec_name.is_empty()) {
-        Vector<String> codec_names;
-
-        typedef jint (*JNI_GetCreatedJavaVMs_t)(JavaVM **, jsize, jsize *);
-        JNI_GetCreatedJavaVMs_t jni_get_created = (JNI_GetCreatedJavaVMs_t)dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs");
-        if (jni_get_created) {
-            JavaVM *vm = nullptr;
-            jsize vm_count = 0;
-            if (jni_get_created(&vm, 1, &vm_count) == JNI_OK && vm_count > 0 && vm) {
-                JNIEnv *env = nullptr;
-                bool attached = false;
-                jint ret = vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
-                if (ret == JNI_EDETACHED) {
-                    ret = vm->AttachCurrentThread(&env, nullptr);
-                    attached = (ret == JNI_OK);
-                }
-                if (env) {
-                    jclass cls = env->FindClass("android/media/MediaCodecList");
-                    if (cls) {
-                        jmethodID mid = env->GetStaticMethodID(cls, "getCodecInfos", "()[Landroid/media/MediaCodecInfo;");
-                        if (mid) {
-                            jobjectArray arr = (jobjectArray)env->CallStaticObjectMethod(cls, mid);
-                            if (arr) {
-                                jsize len = env->GetArrayLength(arr);
-                                for (jsize i = 0; i < len; i++) {
-                                    jobject info = env->GetObjectArrayElement(arr, i);
-                                    if (!info) continue;
-                                    jclass infoCls = env->GetObjectClass(info);
-                                    jmethodID nameMid = env->GetMethodID(infoCls, "getName", "()Ljava/lang/String;");
-                                    if (nameMid) {
-                                        jstring jname = (jstring)env->CallObjectMethod(info, nameMid);
-                                        if (jname) {
-                                            const char *cname = env->GetStringUTFChars(jname, nullptr);
-                                            if (cname) {
-                                                codec_names.push_back(String(cname));
-                                                env->ReleaseStringUTFChars(jname, cname);
-                                            }
-                                            env->DeleteLocalRef(jname);
-                                        }
-                                    }
-                                    env->DeleteLocalRef(info);
-                                }
-                            }
-                        }
-                        env->DeleteLocalRef(cls);
-                    }
-                    if (attached) vm->DetachCurrentThread();
-                }
-            }
-        }
-
-        for (int i = 0; i < codec_names.size(); i++) {
-            String kn = codec_names[i].to_lower();
-            bool matches_family = false;
-            if (codec_family == CODEC_FAMILY_H264 && (kn.find("avc") != -1 || kn.find("h264") != -1))
-                matches_family = true;
-            else if (codec_family == CODEC_FAMILY_H265 && (kn.find("hevc") != -1 || kn.find("h265") != -1))
-                matches_family = true;
-            else if (codec_family == CODEC_FAMILY_AV1 && kn.find("av1") != -1)
-                matches_family = true;
-
-            if (matches_family && (kn.find("low_latency") != -1 || kn.find("low-latency") != -1)) {
-                candidates.push_back(base_codec_name + "_mediacodec_lowlat:" + codec_names[i]);
-            }
-        }
-
         candidates.push_back(base_codec_name + "_mediacodec");
     }
 #endif
 
     if (codec_family == CODEC_FAMILY_H264) {
+        candidates.push_back("h264_mediacodec");
         candidates.push_back("h264");
     } else if (codec_family == CODEC_FAMILY_H265) {
         candidates.push_back("hevc");
@@ -180,18 +110,8 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
         base_name = base_name.substr(0, base_name.length() - 7);
     }
 
-    NF_LOG("FfmpegDecoder",
-        "_try_open: base='%s' full='%s' hw=%s w=%d h=%d",
-        base_name.utf8().get_data(), codec_name.utf8().get_data(),
-        (hw_type == AV_HWDEVICE_TYPE_NONE) ? "NONE" : av_hwdevice_get_type_name(hw_type),
-        width, height);
-
     const AVCodec *codec = avcodec_find_decoder_by_name(base_name.utf8().get_data());
-    if (!codec) {
-        NF_LOG("FfmpegDecoder",
-            "avcodec_find_decoder_by_name FAILED for '%s'", base_name.utf8().get_data());
-        return -1;
-    }
+    if (!codec) return -1;
 
     AVCodecContext *ctx = avcodec_alloc_context3(codec);
     if (!ctx)
@@ -259,6 +179,11 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
         av_dict_set(&opts, "ndk_codec", "1", 0);
     }
 
+    if (is_mediacodec && ctx->codec_id == AV_CODEC_ID_H264 && !ctx->extradata) {
+        avcodec_free_context(&ctx);
+        return -1;
+    }
+
     String special_component;
     if (sep != -1) {
         special_component = codec_name.substr(sep + 1, codec_name.length() - (sep + 1));
@@ -268,13 +193,6 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
     }
 
     int ret = avcodec_open2(ctx, codec, &opts);
-
-    NF_LOG("FfmpegDecoder",
-        "avcodec_open2 => %d base=%s full=%s hw=%s w=%d h=%d",
-        ret, base_name.utf8().get_data(), codec_name.utf8().get_data(),
-        (hw_type == AV_HWDEVICE_TYPE_NONE) ? "NONE" : av_hwdevice_get_type_name(hw_type),
-        width, height);
-
     if (opts) av_dict_free(&opts);
 
     if (ret < 0) {
@@ -349,7 +267,6 @@ int FfmpegDecoder::setup(int video_format, int width, int height, bool disable_h
         is_raw_decode_active = true;
         video_width = width;
         video_height = height;
-        NF_LOG("FfmpegDecoder", "setup: RAW mode %dx%d (no FFmpeg decoder)", width, height);
         return 0;
     }
 
@@ -363,14 +280,6 @@ int FfmpegDecoder::setup(int video_format, int width, int height, bool disable_h
     Vector<AVHWDeviceType> hw_devices;
     if (!disable_hw) hw_devices = _get_supported_hw_devices();
     hw_devices.push_back(AV_HWDEVICE_TYPE_NONE);
-
-    NF_LOG("FfmpegDecoder",
-        "setup: family=%d w=%d h=%d candidates=%d hw_devices=%d",
-        family, width, height, candidates.size(), hw_devices.size());
-    for (int i = 0; i < candidates.size(); i++) {
-        NF_LOG("FfmpegDecoder",
-            "  candidate[%d]: %s", i, candidates[i].utf8().get_data());
-    }
 
     bool opened = false;
     String opened_name;
@@ -393,11 +302,9 @@ int FfmpegDecoder::setup(int video_format, int width, int height, bool disable_h
     }
 
     if (!opened) {
-        UtilityFunctions::printerr("[FfmpegDecoder] No usable decoder found!");
+        NF_LOGE("FfmpegDecoder", "No usable decoder found!");
         return -1;
     }
-
-    UtilityFunctions::print("[FfmpegDecoder] Decoder: ", opened_name, " (", opened_hw, ") ", width, "x", height);
 
     video_width = width;
     video_height = height;
@@ -440,6 +347,61 @@ bool FfmpegDecoder::is_raw_decode() const {
 
 int FfmpegDecoder::get_video_width() const { return video_width; }
 int FfmpegDecoder::get_video_height() const { return video_height; }
+
+int FfmpegDecoder::upgrade_to_mediacodec(const uint8_t *extradata, int extradata_size) {
+    if (!v_codec_ctx || v_codec_ctx->codec_id != AV_CODEC_ID_H264) return -1;
+    if (is_hw_decode_active) return -1;
+
+    int w = v_codec_ctx->width;
+    int h = v_codec_ctx->height;
+
+    avcodec_free_context(&v_codec_ctx);
+    v_codec = nullptr;
+
+    const AVCodec *codec = avcodec_find_decoder_by_name("h264_mediacodec");
+    if (!codec) return -1;
+
+    AVCodecContext *ctx = avcodec_alloc_context3(codec);
+    if (!ctx) return -1;
+
+    ctx->opaque = this;
+    ctx->width = w;
+    ctx->height = h;
+    ctx->coded_width = w;
+    ctx->coded_height = h;
+
+    ctx->extradata = (uint8_t *)av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!ctx->extradata) {
+        avcodec_free_context(&ctx);
+        return -1;
+    }
+    memcpy(ctx->extradata, extradata, extradata_size);
+    ctx->extradata_size = extradata_size;
+
+    ctx->thread_count = 1;
+    ctx->thread_type = 0;
+
+    AVDictionary *opts = nullptr;
+    av_dict_set(&opts, "ndk_codec", "1", 0);
+
+    int ret = avcodec_open2(ctx, codec, &opts);
+    if (opts) av_dict_free(&opts);
+
+    if (ret < 0) {
+        char err_buf[128] = {0};
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        NF_LOGE("FfmpegDecoder", "upgrade_to_mediacodec: avcodec_open2 failed (%d: %s)", ret, err_buf);
+        avcodec_free_context(&ctx);
+        return -1;
+    }
+
+    v_codec = codec;
+    v_codec_ctx = ctx;
+    is_hw_decode_active = true;
+
+    NF_LOG("FfmpegDecoder", "upgrade_to_mediacodec: %s %dx%d", codec->name, w, h);
+    return 0;
+}
 
 void FfmpegDecoder::_bind_methods() {
     ClassDB::bind_method(D_METHOD("probe_video_format", "codec_preference", "disable_hw"), &FfmpegDecoder::probe_video_format);

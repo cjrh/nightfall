@@ -90,8 +90,21 @@ private:
 
     AVColorSpace _resolve_frame_colorspace(AVFrame *frame) const;
 
+    static bool _extract_h264_sps_pps(const uint8_t *data, int size,
+                                       uint8_t **sps, int *sps_size,
+                                       uint8_t **pps, int *pps_size);
+    static uint8_t *_build_avcc_extradata(const uint8_t *sps, int sps_size,
+                                           const uint8_t *pps, int pps_size,
+                                           int *out_size);
+    void _try_h264_hw_upgrade();
+
     std::atomic<bool> is_streaming_{false};
     std::atomic<bool> decoder_ready_{false};
+
+    uint8_t *h264_extradata_ = nullptr;
+    int h264_extradata_size_ = 0;
+    std::atomic<bool> h264_hw_upgrade_pending_{false};
+    std::atomic<bool> h264_hw_upgraded_{false};
 
     Ref<FfmpegDecoder> decoder_;
     Ref<TextureUploader> uploader_;

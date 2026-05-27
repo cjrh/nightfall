@@ -10,12 +10,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
-#include <cerrno>
 #include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 #include "nf_log.h"
 
@@ -41,11 +36,129 @@ StreamConnection::StreamConnection() {
 
 StreamConnection::~StreamConnection() {
     stop();
+    if (h264_extradata_) {
+        av_freep(&h264_extradata_);
+        h264_extradata_size_ = 0;
+    }
+}
+
+bool StreamConnection::_extract_h264_sps_pps(const uint8_t *data, int size,
+                                               uint8_t **sps, int *sps_size,
+                                               uint8_t **pps, int *pps_size) {
+    *sps = nullptr; *sps_size = 0;
+    *pps = nullptr; *pps_size = 0;
+
+    int i = 0;
+    while (i < size - 3) {
+        int sc_size = 0;
+        if (i + 3 < size && data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1) {
+            sc_size = 4;
+        } else if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 1) {
+            sc_size = 3;
+        }
+
+        if (sc_size > 0) {
+            int nalu_start = i + sc_size;
+            if (nalu_start >= size) break;
+
+            int nalu_type = data[nalu_start] & 0x1f;
+
+            int nalu_end = size;
+            for (int j = nalu_start + 1; j < size - 2; j++) {
+                if ((data[j] == 0 && data[j+1] == 0 && data[j+2] == 1) ||
+                    (j + 3 < size && data[j] == 0 && data[j+1] == 0 && data[j+2] == 0 && data[j+3] == 1)) {
+                    nalu_end = j;
+                    while (nalu_end > nalu_start && data[nalu_end - 1] == 0) nalu_end--;
+                    break;
+                }
+            }
+
+            int nalu_len = nalu_end - nalu_start;
+
+            if (nalu_type == 7 && !*sps) {
+                *sps = (uint8_t *)av_malloc(nalu_len);
+                memcpy(*sps, data + nalu_start, nalu_len);
+                *sps_size = nalu_len;
+            } else if (nalu_type == 8 && !*pps) {
+                *pps = (uint8_t *)av_malloc(nalu_len);
+                memcpy(*pps, data + nalu_start, nalu_len);
+                *pps_size = nalu_len;
+            }
+
+            i = nalu_start;
+            if (*sps && *pps) return true;
+        } else {
+            i++;
+        }
+    }
+
+    return (*sps && *pps);
+}
+
+uint8_t *StreamConnection::_build_avcc_extradata(const uint8_t *sps, int sps_size,
+                                                   const uint8_t *pps, int pps_size,
+                                                   int *out_size) {
+    int total = 8 + sps_size + 3 + pps_size;
+    uint8_t *ed = (uint8_t *)av_mallocz(total + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!ed) return nullptr;
+
+    int pos = 0;
+    ed[pos++] = 0x01;
+    ed[pos++] = sps[0];
+    ed[pos++] = sps[1];
+    ed[pos++] = sps[2];
+    ed[pos++] = 0xFF;
+    ed[pos++] = 0xE1;
+    ed[pos++] = (sps_size >> 8) & 0xFF;
+    ed[pos++] = sps_size & 0xFF;
+    memcpy(ed + pos, sps, sps_size);
+    pos += sps_size;
+    ed[pos++] = 0x01;
+    ed[pos++] = (pps_size >> 8) & 0xFF;
+    ed[pos++] = pps_size & 0xFF;
+    memcpy(ed + pos, pps, pps_size);
+    pos += pps_size;
+
+    *out_size = pos;
+    return ed;
+}
+
+void StreamConnection::_try_h264_hw_upgrade() {
+    if (!h264_hw_upgrade_pending_.load() || h264_hw_upgraded_.load()) return;
+    if (!h264_extradata_ || h264_extradata_size_ == 0) return;
+
+    h264_hw_upgrade_pending_.store(false);
+
+    int ret = decoder_->upgrade_to_mediacodec(h264_extradata_, h264_extradata_size_);
+    if (ret == 0) {
+        h264_hw_upgraded_.store(true);
+
+        uploader_->setup(decoder_->get_video_width(), decoder_->get_video_height(),
+                         AV_PIX_FMT_NV12,
+                         (int)AVCOL_SPC_BT709,
+                         (int)AVCOL_RANGE_UNSPECIFIED);
+
+        LiRequestIdrFrame();
+
+        call_deferred("emit_signal", "h264_hw_upgraded");
+    } else {
+        NF_LOGE("StreamConnection", "H.264 HW upgrade failed (%d)", ret);
+    }
+
+    av_freep(&h264_extradata_);
+    h264_extradata_size_ = 0;
 }
 
 int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, int redrawRate, void *context, int drFlags) {
     auto *self = active_instance_;
     if (!self) return -1;
+
+    self->h264_hw_upgrade_pending_.store(false);
+    self->h264_hw_upgraded_.store(false);
+    if (self->h264_extradata_) {
+        av_freep(&self->h264_extradata_);
+        self->h264_extradata_size_ = 0;
+    }
 
     self->active_video_format_ = videoFormat;
     NF_LOG("StreamConnection", "Decoder setup: format=0x%x %dx%d@%dfps", videoFormat, width, height, redrawRate);
@@ -88,20 +201,18 @@ void StreamConnection::_cb_decoder_cleanup() {
         self->decoder_->cleanup();
         self->uploader_->cleanup();
         self->decoder_ready_.store(false);
+        self->h264_hw_upgrade_pending_.store(false);
+        self->h264_hw_upgraded_.store(false);
+        if (self->h264_extradata_) {
+            av_freep(&self->h264_extradata_);
+            self->h264_extradata_size_ = 0;
+        }
     }
 }
 
 int StreamConnection::_cb_submit_decode_unit(PDECODE_UNIT decodeUnit) {
     auto *self = active_instance_;
     if (!self || !self->is_streaming_.load()) return DR_OK;
-
-    static int submit_count = 0;
-    if (submit_count == 0) {
-        NF_LOG("StreamConnection", "First submit: self=%p", self);
-    }
-    if (++submit_count <= 5 || submit_count % 300 == 0) {
-        NF_LOG("StreamConnection", "Submit decode unit #%d: fullLen=%d", submit_count, decodeUnit->fullLength);
-    }
 
     AVPacket *pkt = av_packet_alloc();
     if (!pkt) return DR_OK;
@@ -123,6 +234,24 @@ int StreamConnection::_cb_submit_decode_unit(PDECODE_UNIT decodeUnit) {
     }
 
     pkt->pts = decodeUnit->presentationTimeUs;
+
+#if defined(__ANDROID__)
+    {
+        auto *self = active_instance_;
+        if (self && !self->h264_extradata_ && self->active_video_format_ == 0x1) {
+            uint8_t *sps = nullptr, *pps = nullptr;
+            int sps_size = 0, pps_size = 0;
+            if (_extract_h264_sps_pps(pkt->data, pkt->size, &sps, &sps_size, &pps, &pps_size)) {
+                self->h264_extradata_ = _build_avcc_extradata(sps, sps_size, pps, pps_size, &self->h264_extradata_size_);
+                if (self->h264_extradata_) {
+                    self->h264_hw_upgrade_pending_.store(true);
+                }
+                av_freep(&sps);
+                av_freep(&pps);
+            }
+        }
+    }
+#endif
 
     auto now = std::chrono::steady_clock::now();
     auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
@@ -332,49 +461,7 @@ void StreamConnection::_connection_thread_func() {
     clCallbacks.setControllerLED = _cb_set_controller_led;
     clCallbacks.logMessage = _cb_log_message;
 
-    NF_LOG("StreamConnection", "Starting connection to %s %dx%d@%dfps",
-           server_info_.address ? server_info_.address : "(null)", stream_config_.width, stream_config_.height, stream_config_.fps);
-
-    if (!server_info_.address || strlen(server_info_.address) == 0) {
-        NF_LOG("StreamConnection", "ERROR: server address is empty! host_address_std_=%s", host_address_std_.c_str());
-    }
-
-    NF_LOG("StreamConnection", "server_info: address=%s rtsp=%s appVer=%s gfeVer=%s codecMode=%d",
-           server_info_.address ? server_info_.address : "(null)",
-           server_info_.rtspSessionUrl ? server_info_.rtspSessionUrl : "(null)",
-           server_info_.serverInfoAppVersion ? server_info_.serverInfoAppVersion : "(null)",
-           server_info_.serverInfoGfeVersion ? server_info_.serverInfoGfeVersion : "(null)",
-           server_info_.serverCodecModeSupport);
-
-    NF_LOG("StreamConnection", "stream_config: %dx%d@%dfps bitrate=%d packetSize=%d streamingRemotely=%d audioConfig=0x%x videoFormats=0x%x encryption=0x%x colorSpace=%d colorRange=%d",
-           stream_config_.width, stream_config_.height, stream_config_.fps,
-           stream_config_.bitrate, stream_config_.packetSize, stream_config_.streamingRemotely,
-           stream_config_.audioConfiguration, stream_config_.supportedVideoFormats,
-           stream_config_.encryptionFlags, stream_config_.colorSpace, stream_config_.colorRange);
-
-    int test_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (test_sock >= 0) {
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(48010);
-        inet_pton(AF_INET, host_address_std_.c_str(), &addr.sin_addr);
-        int cr = ::connect(test_sock, (struct sockaddr*)&addr, sizeof(addr));
-        NF_LOG("StreamConnection", "Pre-flight TCP test to %s:48010: sock=%d connect=%d errno=%d",
-               host_address_std_.c_str(), test_sock, cr, errno);
-        close(test_sock);
-    } else {
-        NF_LOG("StreamConnection", "Pre-flight TCP test: socket() failed errno=%d", errno);
-    }
-
-    const char *launch_params = LiGetLaunchUrlQueryParameters();
-    if (launch_params && strlen(launch_params) > 0) {
-        NF_LOG("StreamConnection", "Launch URL params: %s", launch_params);
-    }
-
     int ret = LiStartConnection(&server_info_, &stream_config_, &clCallbacks, &drCallbacks, &arCallbacks, nullptr, 0, nullptr, 0);
-
-    NF_LOG("StreamConnection", "LiStartConnection returned: %d (errno=%d)", ret, errno);
 
     if (ret != 0) {
         is_streaming_.store(false);
@@ -385,20 +472,14 @@ void StreamConnection::_connection_thread_func() {
 
 void StreamConnection::_decode_thread_func() {
     AVPacket *pkt = nullptr;
-    NF_LOG("StreamConnection", "Decode thread started this=%p", this);
 
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         queue_cv_.wait_for(lock, std::chrono::milliseconds(10000), [this] {
             return is_streaming_.load() || !packet_queue_.empty();
         });
-        if (!is_streaming_.load()) {
-            NF_LOG("StreamConnection", "Decode thread: stream never started, exiting");
-            return;
-        }
+        if (!is_streaming_.load()) return;
     }
-
-    NF_LOG("StreamConnection", "Decode thread: stream active, starting decode loop");
 
     while (true) {
         {
@@ -407,11 +488,7 @@ void StreamConnection::_decode_thread_func() {
                 return !packet_queue_.empty() || !is_streaming_.load();
             });
 
-            if (!is_streaming_.load() && packet_queue_.empty()) {
-                NF_LOG("StreamConnection", "Decode thread exiting: streaming=%d queue=%d",
-                    is_streaming_.load(), (int)packet_queue_.size());
-                break;
-            }
+            if (!is_streaming_.load() && packet_queue_.empty()) break;
 
             if (packet_queue_.empty()) continue;
 
@@ -463,7 +540,54 @@ void StreamConnection::_decode_thread_func() {
                 continue;
             }
 
+            if (decoder_->is_hw_decode() && ctx->codec_id == AV_CODEC_ID_H264) {
+                int out_size = pkt->size + 1024;
+                uint8_t *out = (uint8_t *)av_malloc(out_size + AV_INPUT_BUFFER_PADDING_SIZE);
+                if (out) {
+                    int out_pos = 0;
+                    int i = 0;
+                    while (i < pkt->size - 3) {
+                        int sc_len = 0;
+                        if (i + 3 < pkt->size && pkt->data[i] == 0 && pkt->data[i+1] == 0 && pkt->data[i+2] == 0 && pkt->data[i+3] == 1) {
+                            sc_len = 4;
+                        } else if (pkt->data[i] == 0 && pkt->data[i+1] == 0 && pkt->data[i+2] == 1) {
+                            sc_len = 3;
+                        }
+
+                        if (sc_len == 0) { i++; continue; }
+
+                        int nalu_start = i + sc_len;
+                        int nalu_end = pkt->size;
+                        for (int j = nalu_start + 1; j < pkt->size - 2; j++) {
+                            if ((pkt->data[j] == 0 && pkt->data[j+1] == 0 && pkt->data[j+2] == 1) ||
+                                (j + 3 < pkt->size && pkt->data[j] == 0 && pkt->data[j+1] == 0 && pkt->data[j+2] == 0 && pkt->data[j+3] == 1)) {
+                                nalu_end = j;
+                                break;
+                            }
+                        }
+
+                        int nalu_len = nalu_end - nalu_start;
+                        if (out_pos + 4 + nalu_len > out_size) break;
+
+                        out[out_pos++] = (nalu_len >> 24) & 0xFF;
+                        out[out_pos++] = (nalu_len >> 16) & 0xFF;
+                        out[out_pos++] = (nalu_len >> 8) & 0xFF;
+                        out[out_pos++] = nalu_len & 0xFF;
+                        memcpy(out + out_pos, pkt->data + nalu_start, nalu_len);
+                        out_pos += nalu_len;
+
+                        i = nalu_end;
+                    }
+
+                    av_packet_unref(pkt);
+                    av_new_packet(pkt, out_pos);
+                    memcpy(pkt->data, out, out_pos);
+                    av_freep(&out);
+                }
+            }
+
             int send_ret = avcodec_send_packet(ctx, pkt);
+
             av_packet_free(&pkt);
 
             if (send_ret < 0 && send_ret != AVERROR(EAGAIN) && send_ret != AVERROR_EOF) {
@@ -480,16 +604,11 @@ void StreamConnection::_decode_thread_func() {
                 }
                 if (recv_ret < 0) {
                     av_frame_free(&tmp);
-                    static int recv_fail_count = 0;
-                    if (++recv_fail_count <= 5) {
-                        NF_LOG("StreamConnection", "Receive frame failed: %d", recv_ret);
-                    }
                     break;
                 }
 
-                static int decode_ok_count = 0;
-                if (++decode_ok_count <= 5 || decode_ok_count % 300 == 0) {
-                    NF_LOG("StreamConnection", "Decoded frame #%d: %dx%d format=%d", decode_ok_count, tmp->width, tmp->height, tmp->format);
+                if (h264_hw_upgrade_pending_.load() && !h264_hw_upgraded_.load()) {
+                    _try_h264_hw_upgrade();
                 }
 
                 frames_decoded_.fetch_add(1);
@@ -530,10 +649,7 @@ void StreamConnection::_clear_packet_queue() {
 }
 
 void StreamConnection::start(const String &host, const Dictionary &server_info, const Dictionary &stream_config, bool disable_hw) {
-    NF_LOG("StreamConnection", "start() called: is_streaming=%d conn_thread_joinable=%d", is_streaming_.load(), connection_thread_.joinable());
-
     if (connection_thread_.joinable()) {
-        NF_LOG("StreamConnection", "Joining previous connection thread");
         is_streaming_.store(false);
         decoder_ready_.store(false);
         queue_cv_.notify_all();
@@ -795,4 +911,5 @@ void StreamConnection::_bind_methods() {
     ADD_SIGNAL(MethodInfo("connection_status_update", PropertyInfo(Variant::INT, "status")));
     ADD_SIGNAL(MethodInfo("hdr_mode_changed", PropertyInfo(Variant::BOOL, "hdr_enabled"), PropertyInfo(Variant::DICTIONARY, "metadata")));
     ADD_SIGNAL(MethodInfo("log_message", PropertyInfo(Variant::STRING, "message")));
+    ADD_SIGNAL(MethodInfo("h264_hw_upgraded"));
 }

@@ -46,6 +46,7 @@ void NightfallStream::_ready() {
     stream_connection_->connect("stage_failed", callable_mp(this, &NightfallStream::_on_stage_failed));
     stream_connection_->connect("connection_status_update", callable_mp(this, &NightfallStream::_on_connection_status_update));
     stream_connection_->connect("log_message", callable_mp(this, &NightfallStream::_on_log_message));
+    stream_connection_->connect("h264_hw_upgraded", callable_mp(this, &NightfallStream::_on_h264_hw_upgraded));
 }
 
 void NightfallStream::_process(double /*delta*/) {
@@ -289,6 +290,10 @@ void NightfallStream::_on_log_message(const String &message) {
     emit_signal("log_message", message);
 }
 
+void NightfallStream::_on_h264_hw_upgraded() {
+    emit_signal("h264_hw_upgraded");
+}
+
 void NightfallStream::_attempt_reconnect() {
     reconnect_attempts_++;
 
@@ -383,6 +388,7 @@ void NightfallStream::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_stream_connection"), &NightfallStream::get_stream_connection);
     ClassDB::bind_method(D_METHOD("_on_pair_completed", "success", "message"), &NightfallStream::_on_pair_completed);
     ClassDB::bind_method(D_METHOD("_on_log_message", "message"), &NightfallStream::_on_log_message);
+    ClassDB::bind_method(D_METHOD("_on_h264_hw_upgraded"), &NightfallStream::_on_h264_hw_upgraded);
 
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reconnect"), "set_auto_reconnect", "get_auto_reconnect");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_reconnect_attempts"), "set_max_reconnect_attempts", "get_max_reconnect_attempts");
@@ -400,4 +406,5 @@ void NightfallStream::_bind_methods() {
     ADD_SIGNAL(MethodInfo("reconnect_failed"));
     ADD_SIGNAL(MethodInfo("pair_completed", PropertyInfo(Variant::BOOL, "success"), PropertyInfo(Variant::STRING, "message")));
     ADD_SIGNAL(MethodInfo("log_message", PropertyInfo(Variant::STRING, "message")));
+    ADD_SIGNAL(MethodInfo("h264_hw_upgraded"));
 }

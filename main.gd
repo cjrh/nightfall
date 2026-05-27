@@ -1084,6 +1084,10 @@ func _ready():
 	v2_node.stream_terminated.connect(func(err_code, err_msg):
 		_on_stream_terminated(err_msg)
 	)
+	v2_node.h264_hw_upgraded.connect(func():
+		_bind_yuv_textures()
+		_log("[H264] HW upgrade: re-bound YUV textures for NV12")
+	)
 	v2_node.log_message.connect(func(msg):
 		if "dropped" in msg or "Unrecoverable" in msg or "Waiting for IDR" in msg:
 			stats_network_events += 1
