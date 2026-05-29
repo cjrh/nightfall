@@ -118,7 +118,6 @@ var ui_controller: UIController
 var auto_detect: AutoDetect
 var depth_estimator: DepthEstimatorModule
 var virtual_keyboard: VirtualKeyboard
-var virtual_gamepad: VirtualGamepad
 var welcome_screen: WelcomeScreen
 var screen_manager: ScreenManager
 var settings_controller: SettingsController
@@ -133,7 +132,6 @@ var _comp_cyl_central_angle := 0.0
 var comp_cursor: Node3D = null
 var comp_ui: Node3D = null
 var comp_kb: Node3D = null
-var comp_gp: Node3D = null
 var comp_cursor_viewport: SubViewport = null
 var comp_layer: Node3D = null
 var comp_viewport: SubViewport = null
@@ -156,7 +154,6 @@ var _screen_mesh_saved_mat: Material = null
 var _screen_mesh_original_mat: Material = null
 var _ui_saved_mat: Material = null
 var _kb_saved_mat: Material = null
-var _gp_saved_mat: Material = null
 
 var _log_lines: PackedStringArray = []
 var _ui_viewport_size := Vector2i(600, 300)
@@ -306,17 +303,6 @@ func _setup_comp_layer():
 	xr_origin.add_child(comp_kb)
 	comp_kb.set_layer_viewport(virtual_keyboard.viewport)
 	_log("[COMP] Keyboard composition layer created")
-
-	comp_gp = OpenXRCompositionLayerQuad.new()
-	comp_gp.name = "CompGPLayer"
-	comp_gp.set_sort_order(2)
-	comp_gp.set_enable_hole_punch(false)
-	comp_gp.set_alpha_blend(true)
-	comp_gp.set_quad_size(virtual_gamepad.mesh_size)
-	comp_gp.visible = false
-	xr_origin.add_child(comp_gp)
-	comp_gp.set_layer_viewport(virtual_gamepad.viewport)
-	_log("[COMP] Gamepad composition layer created")
 
 	comp_cylinder_left = OpenXRCompositionLayerCylinder.new()
 	comp_cylinder_left.name = "CompCylinderLeft"
@@ -586,16 +572,6 @@ func _make_kb_transparent():
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	virtual_keyboard.mesh_instance.material_override = mat
 
-func _make_gp_transparent():
-	if not virtual_gamepad:
-		return
-	_gp_saved_mat = virtual_gamepad.mesh_instance.material_override
-	var mat = StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0, 0, 0, 0)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	virtual_gamepad.mesh_instance.material_override = mat
-
 func _restore_screen_material():
 	if _screen_mesh_saved_mat:
 		screen_mesh.material_override = _screen_mesh_saved_mat
@@ -615,11 +591,6 @@ func _restore_kb_material():
 	if _kb_saved_mat and virtual_keyboard:
 		virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
 		_kb_saved_mat = null
-
-func _restore_gp_material():
-	if _gp_saved_mat and virtual_gamepad:
-		virtual_gamepad.mesh_instance.material_override = _gp_saved_mat
-		_gp_saved_mat = null
 
 func _get_steady_hit(raw: Vector3) -> Vector3:
 	if pointer_steady == 0 or not is_xr_active:
@@ -705,12 +676,13 @@ func _update_cursor_layer():
 	var active_raycast = hand_raycast if is_xr_active else mouse_raycast
 	var on_screen = false
 	var pad_on_screen = controller_mapper and controller_mapper.is_active() and controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
+	var tp_capturing = virtual_keyboard and virtual_keyboard.visible and virtual_keyboard.trackpad_active
 	if active_raycast.is_colliding():
 		var hit_point = _get_steady_hit(active_raycast.get_collision_point())
 		var col = active_raycast.get_collider()
 		var par = col.get_parent() if col else null
 		on_screen = (par == screen_mesh)
-		if on_screen and pad_on_screen:
+		if on_screen and (pad_on_screen or tp_capturing):
 			comp_cursor.visible = false
 		else:
 			var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
@@ -766,18 +738,6 @@ func _update_cursor_layer():
 		if virtual_keyboard and _kb_saved_mat:
 			virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
 			_kb_saved_mat = null
-	if comp_gp and virtual_gamepad and virtual_gamepad.visible:
-		comp_gp.global_position = virtual_gamepad.global_position
-		comp_gp.global_rotation = virtual_gamepad.global_rotation
-		comp_gp.visible = true
-		if not _gp_saved_mat:
-			_make_gp_transparent()
-	else:
-		if comp_gp:
-			comp_gp.visible = false
-		if virtual_gamepad and _gp_saved_mat:
-			virtual_gamepad.mesh_instance.material_override = _gp_saved_mat
-			_gp_saved_mat = null
 
 func set_comp_grab_bar_color(viewport: SubViewport, color: Color):
 	if not viewport:
@@ -956,7 +916,6 @@ func _switch_to_mesh_rendering():
 	if comp_cylinder_right: comp_cylinder_right.visible = false
 	if comp_ui: comp_ui.visible = false
 	if comp_kb: comp_kb.visible = false
-	if comp_gp: comp_gp.visible = false
 	if comp_cursor: comp_cursor.visible = false
 	if comp_viewport:
 		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -1092,10 +1051,6 @@ func _ready():
 	virtual_keyboard = VirtualKeyboard.new(self)
 	add_child(virtual_keyboard)
 	virtual_keyboard.build()
-
-	virtual_gamepad = VirtualGamepad.new(self)
-	add_child(virtual_gamepad)
-	virtual_gamepad.build()
 
 	%ScreenGrabBar.material_override = %ScreenGrabBar.material_override.duplicate()
 	_mesh_size = screen_mesh.mesh.size
@@ -1304,13 +1259,7 @@ func _process(delta):
 			_was_b_pressed = b_pressed
 			var a_pressed = right_hand.is_button_pressed("ax_button")
 			if a_pressed and not _was_a_pressed:
-				if virtual_keyboard.visible:
-					virtual_keyboard.toggle()
-					virtual_gamepad.toggle()
-				elif virtual_gamepad.visible:
-					virtual_gamepad.toggle()
-				else:
-					virtual_keyboard.toggle()
+				virtual_keyboard.toggle()
 			_was_a_pressed = a_pressed
 		if _startup_reposition:
 			if xr_camera.global_position.length_squared() > 0.01:

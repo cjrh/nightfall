@@ -26,6 +26,10 @@ var _last_hand_pos: Vector3 = Vector3.ZERO
 var _sensitivity: float = 20000.0
 var _dead_zone: float = 0.001
 var _tp_border: PanelContainer
+var _tp_hint_label: Label = null
+var _tp_left_clicking: bool = false
+var _tp_right_clicking: bool = false
+var _tp_was_stick_click: bool = false
 
 var _KEY_ROWS = [
 	[{"k": KEY_ESCAPE, "l": "Esc", "w": 1.5}, {"k": KEY_F1, "l": "F1"}, {"k": KEY_F2, "l": "F2"}, {"k": KEY_F3, "l": "F3"}, {"k": KEY_F4, "l": "F4"}, {"k": KEY_F5, "l": "F5"}, {"k": KEY_F6, "l": "F6"}, {"k": KEY_F7, "l": "F7"}, {"k": KEY_F8, "l": "F8"}, {"k": KEY_F9, "l": "F9"}, {"k": KEY_F10, "l": "F10"}, {"k": KEY_F11, "l": "F11"}, {"k": KEY_F12, "l": "F12"}, {"k": KEY_DELETE, "l": "Del", "w": 1.5}],
@@ -259,7 +263,8 @@ func _build_trackpad():
 	_kb_root.add_child(right_label)
 
 	var hint = Label.new()
-	hint.text = "Hold trigger &\nmove controller"
+	hint.text = "Click trigger\nto activate"
+	hint.name = "TPHint"
 	hint.position = Vector2(tp_x, cy - 16)
 	hint.size = Vector2(tp_visual_w, 40)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -268,6 +273,7 @@ func _build_trackpad():
 	hint.add_theme_color_override("font_color", Color(0.45, 0.45, 0.5, 0.4))
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_kb_root.add_child(hint)
+	_tp_hint_label = hint
 
 func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 	var s = StyleBoxFlat.new()
@@ -282,13 +288,11 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 		return
 
 	if pixel_pos.x >= _kb_width:
-		if clicking and not was_clicking:
+		if clicking and not was_clicking and not trackpad_active:
 			trackpad_active = true
 			_last_hand_pos = main.right_hand.global_position
 			_set_tp_active_visual(true)
-		if not clicking and was_clicking:
-			trackpad_active = false
-			_set_tp_active_visual(false)
+			_update_tp_hint()
 		return
 
 	var ev_motion = InputEventMouseMotion.new()
@@ -328,41 +332,90 @@ func _set_tp_active_visual(active: bool):
 		else:
 			style.border_color = Color(0.25, 0.25, 0.35, 0.4)
 		_tp_border.add_theme_stylebox_override("panel", style)
+	_update_tp_hint()
+
+func _update_tp_hint():
+	if not _tp_hint_label:
+		return
+	if trackpad_active:
+		_tp_hint_label.text = "Click thumbstick\nto exit"
+		_tp_hint_label.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0, 0.8))
+	else:
+		_tp_hint_label.text = "Click trigger\nto activate"
+		_tp_hint_label.add_theme_color_override("font_color", Color(0.45, 0.45, 0.5, 0.4))
 
 func _process(_delta):
 	if not visible or not main.is_streaming:
 		if trackpad_active:
-			trackpad_active = false
-			_set_tp_active_visual(false)
+			_deactivate_trackpad()
 		return
 
-	if trackpad_active:
-		var trigger = main.right_hand.get_float("trigger") if main.right_hand else 0.0
-		if trigger < 0.5:
-			trackpad_active = false
-			_set_tp_active_visual(false)
+	if not trackpad_active:
+		return
+
+	if main.right_hand:
+		var stick_click = main.right_hand.is_button_pressed("primary_click")
+		if stick_click and not _tp_was_stick_click:
+			_deactivate_trackpad()
+			_tp_was_stick_click = stick_click
 			return
+		_tp_was_stick_click = stick_click
 
-		var hand_pos = main.right_hand.global_position
-		var delta_3d = hand_pos - _last_hand_pos
+	var trigger = main.right_hand.get_float("trigger") if main.right_hand else 0.0
+	if trigger > 0.5 and not _tp_left_clicking:
+		main.stream_backend.send_mouse_button_event(7, 1)
+		_tp_left_clicking = true
+	elif trigger <= 0.5 and _tp_left_clicking:
+		main.stream_backend.send_mouse_button_event(8, 1)
+		_tp_left_clicking = false
 
-		if delta_3d.length() < _dead_zone:
-			_last_hand_pos = hand_pos
-			return
+	var gripping = false
+	if main.right_hand:
+		gripping = main.right_hand.is_button_pressed("grip_click") or main.right_hand.get_float("grip") > 0.5
+	if gripping and not _tp_right_clicking:
+		main.stream_backend.send_mouse_button_event(7, 3)
+		_tp_right_clicking = true
+	elif not gripping and _tp_right_clicking:
+		main.stream_backend.send_mouse_button_event(8, 3)
+		_tp_right_clicking = false
 
-		var cam_right = main.xr_camera.global_transform.basis.x
-		var cam_up = main.xr_camera.global_transform.basis.y
+	if main.right_hand:
+		var stick_y = main.right_hand.get_vector2("primary").y
+		if absf(stick_y) > 0.4:
+			var clicks = int(stick_y * 0.8)
+			if clicks != 0:
+				main.stream_backend.send_scroll_event(clicks)
 
-		var dx = delta_3d.dot(cam_right) * _sensitivity
-		var dy = -delta_3d.dot(cam_up) * _sensitivity
+	var hand_pos = main.right_hand.global_position
+	var delta_3d = hand_pos - _last_hand_pos
 
-		var idx = int(dx)
-		var idy = int(dy)
-
-		if idx != 0 or idy != 0:
-			main.stream_backend.send_mouse_move_event(idx, idy)
-
+	if delta_3d.length() < _dead_zone:
 		_last_hand_pos = hand_pos
+		return
+
+	var cam_right = main.xr_camera.global_transform.basis.x
+	var cam_up = main.xr_camera.global_transform.basis.y
+
+	var dx = delta_3d.dot(cam_right) * _sensitivity
+	var dy = -delta_3d.dot(cam_up) * _sensitivity
+
+	var idx = int(dx)
+	var idy = int(dy)
+
+	if idx != 0 or idy != 0:
+		main.stream_backend.send_mouse_move_event(idx, idy)
+
+	_last_hand_pos = hand_pos
+
+func _deactivate_trackpad():
+	trackpad_active = false
+	_set_tp_active_visual(false)
+	if _tp_left_clicking:
+		main.stream_backend.send_mouse_button_event(8, 1)
+		_tp_left_clicking = false
+	if _tp_right_clicking:
+		main.stream_backend.send_mouse_button_event(8, 3)
+		_tp_right_clicking = false
 
 func _key_from_pos(pixel_pos: Vector2) -> int:
 	for kd in _key_data:
@@ -455,8 +508,7 @@ func toggle():
 		area.monitorable = new_vis
 		area.monitoring = new_vis
 	if not new_vis:
-		trackpad_active = false
-		_set_tp_active_visual(false)
+		_deactivate_trackpad()
 
 func _save_offset():
 	var scr_basis = main.screen_mesh.global_transform.basis.inverse()
