@@ -8,8 +8,10 @@ var area: Area3D
 var collision_shape: CollisionShape3D
 var grab_bar: MeshInstance3D = null
 var grab_bar_area: Area3D = null
-var mesh_size := Vector2(0.82, 0.3)
-var viewport_size := Vector2i(1640, 600)
+var mesh_size := Vector2(1.04, 0.3)
+var viewport_size := Vector2i(2080, 600)
+var _kb_width := 1640
+var _tp_width := 440
 var _key_area_width := 1600
 var _kb_root: Control
 var _key_data: Array = []
@@ -18,6 +20,12 @@ var _shift_on: bool = false
 var _ctrl_on: bool = false
 var _alt_on: bool = false
 var _caps_on: bool = false
+
+var trackpad_active: bool = false
+var _last_hand_pos: Vector3 = Vector3.ZERO
+var _sensitivity: float = 20000.0
+var _dead_zone: float = 0.001
+var _tp_border: PanelContainer
 
 var _KEY_ROWS = [
 	[{"k": KEY_ESCAPE, "l": "Esc", "w": 1.5}, {"k": KEY_F1, "l": "F1"}, {"k": KEY_F2, "l": "F2"}, {"k": KEY_F3, "l": "F3"}, {"k": KEY_F4, "l": "F4"}, {"k": KEY_F5, "l": "F5"}, {"k": KEY_F6, "l": "F6"}, {"k": KEY_F7, "l": "F7"}, {"k": KEY_F8, "l": "F8"}, {"k": KEY_F9, "l": "F9"}, {"k": KEY_F10, "l": "F10"}, {"k": KEY_F11, "l": "F11"}, {"k": KEY_F12, "l": "F12"}, {"k": KEY_DELETE, "l": "Del", "w": 1.5}],
@@ -54,6 +62,7 @@ func build():
 	_kb_root.add_child(kb_bg)
 
 	_build_keys()
+	_build_trackpad()
 
 	var bottom_box = HBoxContainer.new()
 	bottom_box.anchor_left = 0.0
@@ -156,6 +165,110 @@ func _build_keys():
 			x += btn_w + gap
 	_apply_modifier_visuals()
 
+func _build_trackpad():
+	var margin = 26
+	var tp_x = _kb_width + margin / 2
+	var tp_visual_w = _tp_width - margin / 2 - margin
+	var key_start_y = 16
+	var key_h = 72
+	var key_gap = 6
+	var key_rows = 6
+	var keys_height = key_rows * key_h + (key_rows - 1) * key_gap
+	var tp_y = key_start_y
+	var tp_h = keys_height
+
+	var tp_bg = PanelContainer.new()
+	tp_bg.position = Vector2(tp_x, tp_y)
+	tp_bg.size = Vector2(tp_visual_w, tp_h)
+	var tp_bg_style = StyleBoxFlat.new()
+	tp_bg_style.bg_color = Color(0.05, 0.05, 0.1, 0.7)
+	tp_bg_style.set_corner_radius_all(20)
+	tp_bg_style.set_border_width_all(2)
+	tp_bg_style.border_color = Color(0.25, 0.25, 0.35, 0.4)
+	tp_bg.add_theme_stylebox_override("panel", tp_bg_style)
+	tp_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(tp_bg)
+
+	_tp_border = PanelContainer.new()
+	_tp_border.name = "TPBorder"
+	_tp_border.position = Vector2(tp_x, tp_y)
+	_tp_border.size = Vector2(tp_visual_w, tp_h)
+	var border_style = StyleBoxFlat.new()
+	border_style.bg_color = Color(0, 0, 0, 0)
+	border_style.set_corner_radius_all(20)
+	border_style.set_border_width_all(3)
+	border_style.border_color = Color(0.25, 0.25, 0.35, 0.4)
+	_tp_border.add_theme_stylebox_override("panel", border_style)
+	_tp_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(_tp_border)
+
+	var cx = tp_x + tp_visual_w / 2.0
+	var cy = tp_y + tp_h / 2.0
+
+	var title = Label.new()
+	title.text = "TRACKPAD"
+	title.position = Vector2(tp_x, tp_y + 8)
+	title.size = Vector2(tp_visual_w, 24)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55, 0.6))
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(title)
+
+	var arrow_color = Color(0.4, 0.4, 0.5, 0.35)
+	var arrow_len = 50
+
+	var up_label = Label.new()
+	up_label.text = "▲"
+	up_label.position = Vector2(cx - 10, cy - arrow_len - 20)
+	up_label.size = Vector2(20, 20)
+	up_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	up_label.add_theme_font_size_override("font_size", 22)
+	up_label.add_theme_color_override("font_color", arrow_color)
+	up_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(up_label)
+
+	var down_label = Label.new()
+	down_label.text = "▼"
+	down_label.position = Vector2(cx - 10, cy + arrow_len)
+	down_label.size = Vector2(20, 20)
+	down_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	down_label.add_theme_font_size_override("font_size", 22)
+	down_label.add_theme_color_override("font_color", arrow_color)
+	down_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(down_label)
+
+	var left_label = Label.new()
+	left_label.text = "◀"
+	left_label.position = Vector2(cx - arrow_len - 20, cy - 10)
+	left_label.size = Vector2(20, 20)
+	left_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	left_label.add_theme_font_size_override("font_size", 22)
+	left_label.add_theme_color_override("font_color", arrow_color)
+	left_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(left_label)
+
+	var right_label = Label.new()
+	right_label.text = "▶"
+	right_label.position = Vector2(cx + arrow_len, cy - 10)
+	right_label.size = Vector2(20, 20)
+	right_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	right_label.add_theme_font_size_override("font_size", 22)
+	right_label.add_theme_color_override("font_color", arrow_color)
+	right_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(right_label)
+
+	var hint = Label.new()
+	hint.text = "Hold trigger &\nmove controller"
+	hint.position = Vector2(tp_x, cy - 16)
+	hint.size = Vector2(tp_visual_w, 40)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.45, 0.45, 0.5, 0.4))
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_kb_root.add_child(hint)
+
 func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 	var s = StyleBoxFlat.new()
 	s.set_bg_color(bg)
@@ -167,6 +280,17 @@ func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 	if not visible:
 		return
+
+	if pixel_pos.x >= _kb_width:
+		if clicking and not was_clicking:
+			trackpad_active = true
+			_last_hand_pos = main.right_hand.global_position
+			_set_tp_active_visual(true)
+		if not clicking and was_clicking:
+			trackpad_active = false
+			_set_tp_active_visual(false)
+		return
+
 	var ev_motion = InputEventMouseMotion.new()
 	ev_motion.position = pixel_pos
 	ev_motion.global_position = pixel_pos
@@ -192,6 +316,53 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 		for kc in _held_keys.keys():
 			_on_key_release(kc)
 		_held_keys.clear()
+
+func _set_tp_active_visual(active: bool):
+	if not _tp_border:
+		return
+	var style = _tp_border.get_theme_stylebox("panel")
+	if style and style is StyleBoxFlat:
+		style = style.duplicate()
+		if active:
+			style.border_color = Color(0.3, 0.6, 1.0, 0.9)
+		else:
+			style.border_color = Color(0.25, 0.25, 0.35, 0.4)
+		_tp_border.add_theme_stylebox_override("panel", style)
+
+func _process(_delta):
+	if not visible or not main.is_streaming:
+		if trackpad_active:
+			trackpad_active = false
+			_set_tp_active_visual(false)
+		return
+
+	if trackpad_active:
+		var trigger = main.right_hand.get_float("trigger") if main.right_hand else 0.0
+		if trigger < 0.5:
+			trackpad_active = false
+			_set_tp_active_visual(false)
+			return
+
+		var hand_pos = main.right_hand.global_position
+		var delta_3d = hand_pos - _last_hand_pos
+
+		if delta_3d.length() < _dead_zone:
+			_last_hand_pos = hand_pos
+			return
+
+		var cam_right = main.xr_camera.global_transform.basis.x
+		var cam_up = main.xr_camera.global_transform.basis.y
+
+		var dx = delta_3d.dot(cam_right) * _sensitivity
+		var dy = -delta_3d.dot(cam_up) * _sensitivity
+
+		var idx = int(dx)
+		var idy = int(dy)
+
+		if idx != 0 or idy != 0:
+			main.stream_backend.send_mouse_move_event(idx, idy)
+
+		_last_hand_pos = hand_pos
 
 func _key_from_pos(pixel_pos: Vector2) -> int:
 	for kd in _key_data:
@@ -283,6 +454,9 @@ func toggle():
 		area.process_mode = Node.PROCESS_MODE_INHERIT if new_vis else Node.PROCESS_MODE_DISABLED
 		area.monitorable = new_vis
 		area.monitoring = new_vis
+	if not new_vis:
+		trackpad_active = false
+		_set_tp_active_visual(false)
 
 func _save_offset():
 	var scr_basis = main.screen_mesh.global_transform.basis.inverse()

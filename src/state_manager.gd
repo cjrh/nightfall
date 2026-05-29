@@ -18,6 +18,8 @@ func save_state():
 	save.set_value("screen", "cursor_mode", main.cursor_mode)
 	save.set_value("screen", "pointer_steady", main.pointer_steady)
 	save.set_value("screen", "codec_preference", main.codec_preference)
+	save.set_value("controller", "active", main.controller_mapper.active)
+	save.set_value("controller", "ctrl_type", main.controller_mapper.ctrl_type)
 	save.save("user://app_state.cfg")
 	save_host_state()
 
@@ -73,7 +75,7 @@ func load_host_state(ip: String):
 		main.ui_controller.update_option_btn(main._ui_res_btn, main.resolution_labels[main.resolution_idx])
 	var bitrate_label = main.bitrate_labels[main.bitrate_idx + 1] if main.bitrate_idx >= 0 else "Auto"
 	main.ui_controller.update_option_btn(main._ui_bitrate_btn, bitrate_label)
-	main.settings_controller.update_wide_btn_label()
+	main.settings_controller.apply_stereo()
 	if main.depth_estimator:
 		main.depth_estimator.set_enabled(main.settings_controller.get_stereo_mode() >= 3)
 	main.settings_controller.apply_stereo()
@@ -97,6 +99,20 @@ func load_state():
 	else:
 		main.pointer_steady = int(saved_steady)
 	main.codec_preference = save.get_value("screen", "codec_preference", 1)
+	if main.controller_mapper:
+		if save.has_section_key("controller", "active"):
+			main.controller_mapper.active = save.get_value("controller", "active", false)
+			main.controller_mapper.ctrl_type = clampi(save.get_value("controller", "ctrl_type", 0), 0, 1)
+		else:
+			var old_mode = clampi(save.get_value("controller", "mode", 0), 0, 2)
+			if old_mode == 0:
+				main.controller_mapper.active = false
+			else:
+				main.controller_mapper.active = true
+				main.controller_mapper.ctrl_type = 1 if old_mode == 1 else 0
+		if main.ui_controller:
+			main.ui_controller.update_ctrl_mode_btn()
+			main.ui_controller.update_ctrl_type_btn()
 	if save.has_section_key("screen", "size_x"):
 		main._mesh_size = Vector2(save.get_value("screen", "size_x"), save.get_value("screen", "size_y"))
 		if main._mesh_size.x > 0.1 and main._mesh_size.y > 0.1:

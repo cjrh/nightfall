@@ -118,11 +118,13 @@ var ui_controller: UIController
 var auto_detect: AutoDetect
 var depth_estimator: DepthEstimatorModule
 var virtual_keyboard: VirtualKeyboard
+var virtual_gamepad: VirtualGamepad
 var welcome_screen: WelcomeScreen
 var screen_manager: ScreenManager
 var settings_controller: SettingsController
 var state_manager: StateManager
 var host_discovery: HostDiscovery
+var controller_mapper: ControllerMapper
 
 var comp_cylinder: Node3D = null
 var _comp_cyl_center := Vector3.ZERO
@@ -131,6 +133,7 @@ var _comp_cyl_central_angle := 0.0
 var comp_cursor: Node3D = null
 var comp_ui: Node3D = null
 var comp_kb: Node3D = null
+var comp_gp: Node3D = null
 var comp_cursor_viewport: SubViewport = null
 var comp_layer: Node3D = null
 var comp_viewport: SubViewport = null
@@ -153,6 +156,7 @@ var _screen_mesh_saved_mat: Material = null
 var _screen_mesh_original_mat: Material = null
 var _ui_saved_mat: Material = null
 var _kb_saved_mat: Material = null
+var _gp_saved_mat: Material = null
 
 var _log_lines: PackedStringArray = []
 var _ui_viewport_size := Vector2i(600, 300)
@@ -167,9 +171,10 @@ var _ui_3d_btn: Button
 var _ui_res_btn: Button
 var _ui_fps_btn: Button
 var _ui_bitrate_btn: Button
-var _ui_wide_btn: Button
+var _ui_ctrl_type_btn: Button
 var _ui_render_btn: Button
 var _ui_sharpen_btn: Button
+var _ui_ctrl_mode_btn: Button
 var _ui_cursor_btn: Button
 var _ui_steady_btn: Button
 var _ui_codec_btn: Button
@@ -301,6 +306,17 @@ func _setup_comp_layer():
 	xr_origin.add_child(comp_kb)
 	comp_kb.set_layer_viewport(virtual_keyboard.viewport)
 	_log("[COMP] Keyboard composition layer created")
+
+	comp_gp = OpenXRCompositionLayerQuad.new()
+	comp_gp.name = "CompGPLayer"
+	comp_gp.set_sort_order(2)
+	comp_gp.set_enable_hole_punch(false)
+	comp_gp.set_alpha_blend(true)
+	comp_gp.set_quad_size(virtual_gamepad.mesh_size)
+	comp_gp.visible = false
+	xr_origin.add_child(comp_gp)
+	comp_gp.set_layer_viewport(virtual_gamepad.viewport)
+	_log("[COMP] Gamepad composition layer created")
 
 	comp_cylinder_left = OpenXRCompositionLayerCylinder.new()
 	comp_cylinder_left.name = "CompCylinderLeft"
@@ -570,6 +586,16 @@ func _make_kb_transparent():
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	virtual_keyboard.mesh_instance.material_override = mat
 
+func _make_gp_transparent():
+	if not virtual_gamepad:
+		return
+	_gp_saved_mat = virtual_gamepad.mesh_instance.material_override
+	var mat = StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0, 0, 0, 0)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	virtual_gamepad.mesh_instance.material_override = mat
+
 func _restore_screen_material():
 	if _screen_mesh_saved_mat:
 		screen_mesh.material_override = _screen_mesh_saved_mat
@@ -589,6 +615,11 @@ func _restore_kb_material():
 	if _kb_saved_mat and virtual_keyboard:
 		virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
 		_kb_saved_mat = null
+
+func _restore_gp_material():
+	if _gp_saved_mat and virtual_gamepad:
+		virtual_gamepad.mesh_instance.material_override = _gp_saved_mat
+		_gp_saved_mat = null
 
 func _get_steady_hit(raw: Vector3) -> Vector3:
 	if pointer_steady == 0 or not is_xr_active:
@@ -673,43 +704,47 @@ func _update_cursor_layer():
 		return
 	var active_raycast = hand_raycast if is_xr_active else mouse_raycast
 	var on_screen = false
+	var pad_on_screen = controller_mapper and controller_mapper.is_active() and controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
 	if active_raycast.is_colliding():
 		var hit_point = _get_steady_hit(active_raycast.get_collision_point())
 		var col = active_raycast.get_collider()
 		var par = col.get_parent() if col else null
 		on_screen = (par == screen_mesh)
-		var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
-		var to_cam = (xr_camera.global_position - hit_point).normalized()
-		var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
-		var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
-		if cursor_mode == 0:
-			if pointer: pointer.visible = false
-			if circle: circle.visible = true
-			comp_cursor_viewport.size = Vector2i(256, 256)
-			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
-			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
-			comp_cursor.rotate_object_local(Vector3.UP, PI)
-		elif on_screen:
-			if pointer: pointer.visible = true
-			if circle: circle.visible = false
-			comp_cursor_viewport.size = Vector2i(40, 64)
-			comp_cursor.set_quad_size(Vector2(0.04, 0.064))
-			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
-			comp_cursor.rotate_object_local(Vector3.UP, PI)
-			var right = comp_cursor.global_transform.basis.x
-			var up = comp_cursor.global_transform.basis.y
-			comp_cursor.global_position += right * 0.02 - up * 0.032
+		if on_screen and pad_on_screen:
+			comp_cursor.visible = false
 		else:
-			if pointer: pointer.visible = false
-			if circle: circle.visible = true
-			comp_cursor_viewport.size = Vector2i(256, 256)
-			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
-			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
-			comp_cursor.rotate_object_local(Vector3.UP, PI)
-		comp_cursor.visible = true
+			var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
+			var to_cam = (xr_camera.global_position - hit_point).normalized()
+			var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
+			var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
+			if cursor_mode == 0:
+				if pointer: pointer.visible = false
+				if circle: circle.visible = true
+				comp_cursor_viewport.size = Vector2i(256, 256)
+				comp_cursor.set_quad_size(Vector2(0.035, 0.035))
+				comp_cursor.global_position = hit_point + surf_normal * 0.002
+				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+				comp_cursor.rotate_object_local(Vector3.UP, PI)
+			elif on_screen:
+				if pointer: pointer.visible = true
+				if circle: circle.visible = false
+				comp_cursor_viewport.size = Vector2i(40, 64)
+				comp_cursor.set_quad_size(Vector2(0.04, 0.064))
+				comp_cursor.global_position = hit_point + surf_normal * 0.002
+				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+				comp_cursor.rotate_object_local(Vector3.UP, PI)
+				var right = comp_cursor.global_transform.basis.x
+				var up = comp_cursor.global_transform.basis.y
+				comp_cursor.global_position += right * 0.02 - up * 0.032
+			else:
+				if pointer: pointer.visible = false
+				if circle: circle.visible = true
+				comp_cursor_viewport.size = Vector2i(256, 256)
+				comp_cursor.set_quad_size(Vector2(0.035, 0.035))
+				comp_cursor.global_position = hit_point + surf_normal * 0.002
+				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+				comp_cursor.rotate_object_local(Vector3.UP, PI)
+			comp_cursor.visible = true
 	else:
 		comp_cursor.visible = false
 	if pointer_cursor:
@@ -731,6 +766,18 @@ func _update_cursor_layer():
 		if virtual_keyboard and _kb_saved_mat:
 			virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
 			_kb_saved_mat = null
+	if comp_gp and virtual_gamepad and virtual_gamepad.visible:
+		comp_gp.global_position = virtual_gamepad.global_position
+		comp_gp.global_rotation = virtual_gamepad.global_rotation
+		comp_gp.visible = true
+		if not _gp_saved_mat:
+			_make_gp_transparent()
+	else:
+		if comp_gp:
+			comp_gp.visible = false
+		if virtual_gamepad and _gp_saved_mat:
+			virtual_gamepad.mesh_instance.material_override = _gp_saved_mat
+			_gp_saved_mat = null
 
 func set_comp_grab_bar_color(viewport: SubViewport, color: Color):
 	if not viewport:
@@ -838,6 +885,8 @@ func _on_stream_started():
 	if starfield:
 		starfield.emitting = false
 		starfield.visible = false
+	var all_btn_flags = 0x1000|0x2000|0x4000|0x8000|0x0001|0x0002|0x0004|0x0008|0x0100|0x0200|0x0010|0x0020|0x0040|0x0080|0x0400
+	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
 
 func _switch_to_comp_layer():
 	if not comp_layer_available:
@@ -907,6 +956,7 @@ func _switch_to_mesh_rendering():
 	if comp_cylinder_right: comp_cylinder_right.visible = false
 	if comp_ui: comp_ui.visible = false
 	if comp_kb: comp_kb.visible = false
+	if comp_gp: comp_gp.visible = false
 	if comp_cursor: comp_cursor.visible = false
 	if comp_viewport:
 		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -1031,6 +1081,8 @@ func _ready():
 	settings_controller = SettingsController.new(self)
 	state_manager = StateManager.new(self)
 	host_discovery = HostDiscovery.new(self)
+	controller_mapper = ControllerMapper.new(self)
+	add_child(controller_mapper)
 
 	if OS.get_name() == "Android":
 		depth_estimator.setup()
@@ -1040,6 +1092,10 @@ func _ready():
 	virtual_keyboard = VirtualKeyboard.new(self)
 	add_child(virtual_keyboard)
 	virtual_keyboard.build()
+
+	virtual_gamepad = VirtualGamepad.new(self)
+	add_child(virtual_gamepad)
+	virtual_gamepad.build()
 
 	%ScreenGrabBar.material_override = %ScreenGrabBar.material_override.duplicate()
 	_mesh_size = screen_mesh.mesh.size
@@ -1084,10 +1140,19 @@ func _ready():
 	v2_node.stream_terminated.connect(func(err_code, err_msg):
 		_on_stream_terminated(err_msg)
 	)
-	v2_node.h264_hw_upgraded.connect(func():
-		_bind_yuv_textures()
-		_log("[H264] HW upgrade: re-bound YUV textures for NV12")
-	)
+	if v2_node.has_signal("h264_hw_upgraded"):
+		v2_node.h264_hw_upgraded.connect(func():
+			_bind_yuv_textures()
+			_log("[H264] HW upgrade: re-bound YUV textures for NV12")
+		)
+	if v2_node.has_signal("controller_rumble"):
+		v2_node.controller_rumble.connect(func(controller, low_freq, high_freq):
+			_trigger_haptic(controller, low_freq, high_freq)
+		)
+	if v2_node.has_signal("controller_trigger_rumble"):
+		v2_node.controller_trigger_rumble.connect(func(controller, left_motor, right_motor):
+			_trigger_haptic(controller, left_motor, right_motor)
+		)
 	v2_node.log_message.connect(func(msg):
 		if "dropped" in msg or "Unrecoverable" in msg or "Waiting for IDR" in msg:
 			stats_network_events += 1
@@ -1232,14 +1297,21 @@ func _process(delta):
 		_flush_log()
 
 	if is_xr_active:
-		var b_pressed = right_hand.is_button_pressed("by_button")
-		if b_pressed and not _was_b_pressed:
-			_toggle_ui()
-		_was_b_pressed = b_pressed
-		var a_pressed = right_hand.is_button_pressed("ax_button")
-		if a_pressed and not _was_a_pressed:
-			virtual_keyboard.toggle()
-		_was_a_pressed = a_pressed
+		if not controller_mapper or not controller_mapper.is_active():
+			var b_pressed = right_hand.is_button_pressed("by_button")
+			if b_pressed and not _was_b_pressed:
+				_toggle_ui()
+			_was_b_pressed = b_pressed
+			var a_pressed = right_hand.is_button_pressed("ax_button")
+			if a_pressed and not _was_a_pressed:
+				if virtual_keyboard.visible:
+					virtual_keyboard.toggle()
+					virtual_gamepad.toggle()
+				elif virtual_gamepad.visible:
+					virtual_gamepad.toggle()
+				else:
+					virtual_keyboard.toggle()
+			_was_a_pressed = a_pressed
 		if _startup_reposition:
 			if xr_camera.global_position.length_squared() > 0.01:
 				_reposition_screen_and_ui()
@@ -1363,6 +1435,15 @@ func _set_ui_visible(vis: bool):
 		var scr_basis = screen_mesh.global_transform.basis.inverse()
 		_ui_saved_offset = scr_basis * (ui_panel_3d.global_position - screen_mesh.global_position)
 		_ui_has_saved_offset = true
+
+func _trigger_haptic(_controller: int, low_freq: int, high_freq: int):
+	var strength = clampf((low_freq + high_freq) / 510.0, 0.0, 1.0)
+	if strength < 0.01:
+		return
+	if right_hand:
+		right_hand.trigger_haptic_pulse("haptic", strength, 0.05)
+	if left_hand:
+		left_hand.trigger_haptic_pulse("haptic", strength, 0.05)
 
 func _reposition_screen_and_ui():
 	if not is_xr_active:

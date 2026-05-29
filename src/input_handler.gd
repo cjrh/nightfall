@@ -10,11 +10,15 @@ var _BTN_MAP = {
 	JOY_BUTTON_Y: 0x8000,
 	JOY_BUTTON_LEFT_SHOULDER: 0x0100,
 	JOY_BUTTON_RIGHT_SHOULDER: 0x0200,
-	JOY_BUTTON_BACK: 0x0400,
-	JOY_BUTTON_START: 0x0800,
+	JOY_BUTTON_BACK: 0x0020,
+	JOY_BUTTON_START: 0x0010,
 	JOY_BUTTON_LEFT_STICK: 0x0040,
 	JOY_BUTTON_RIGHT_STICK: 0x0080,
 	JOY_BUTTON_GUIDE: 0x0400,
+	JOY_BUTTON_DPAD_UP: 0x0001,
+	JOY_BUTTON_DPAD_DOWN: 0x0002,
+	JOY_BUTTON_DPAD_LEFT: 0x0004,
+	JOY_BUTTON_DPAD_RIGHT: 0x0008,
 }
 
 var pad_buttons: int = 0
@@ -47,7 +51,6 @@ func handle_input(event: InputEvent):
 			else:
 				pad_buttons &= ~(1 << event.button_index)
 			pad_active |= (1 << event.device)
-			print("[GAMEPAD] Button dev=%d btn=%d pressed=%s mask=%d" % [event.device, event.button_index, event.pressed, pad_buttons])
 			_send_controller(event.device)
 		elif event is InputEventJoypadMotion:
 			pad_active |= (1 << event.device)
@@ -70,7 +73,6 @@ func handle_input(event: InputEvent):
 			else:
 				pad_buttons &= ~(1 << event.button_index)
 			pad_active |= (1 << event.device)
-			print("[GAMEPAD] Button dev=%d btn=%d pressed=%s mask=%d" % [event.device, event.button_index, event.pressed, pad_buttons])
 			_send_controller(event.device)
 			return
 		elif event is InputEventJoypadMotion:
@@ -92,7 +94,6 @@ func release_stream_mouse():
 	if OS.get_name() == "Android":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	main.ui_controller.update_ui()
-	print("[MOUSE] Released - back to pointer mode.")
 
 func _send_controller(device: int):
 	var lx = Input.get_joy_axis(device, JOY_AXIS_LEFT_X)

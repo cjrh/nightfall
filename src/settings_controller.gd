@@ -227,7 +227,6 @@ func cycle_resolution():
 	else:
 		main.host_resolution = main.resolutions[main.resolution_idx]
 		main.ui_controller.update_option_btn(main._ui_res_btn, main.resolution_labels[main.resolution_idx])
-	update_wide_btn_label()
 	main.state_manager.save_state()
 	_schedule_stream_restart()
 
@@ -242,7 +241,6 @@ func cycle_bitrate():
 
 func cycle_double_h():
 	main.double_h = not main.double_h
-	update_wide_btn_label()
 	main.state_manager.save_state()
 	_schedule_stream_restart()
 
@@ -262,10 +260,3 @@ func _schedule_stream_restart():
 	main.stream_backend.stop_play_stream()
 	await main.get_tree().create_timer(0.5).timeout
 	main.stream_manager.start_stream(main.current_host_id, main._selected_app_id)
-
-func update_wide_btn_label():
-	if main.double_h:
-		var w = main.host_resolution.x * 2
-		main.ui_controller.update_option_btn(main._ui_wide_btn, "%dx%d" % [w, main.host_resolution.y])
-	else:
-		main.ui_controller.update_option_btn(main._ui_wide_btn, "Off")

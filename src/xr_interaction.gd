@@ -2,12 +2,17 @@ class_name XRInteraction
 extends RefCounted
 
 var main: Node3D
+var pointer_on_ui: bool = false
 
 func _init(owner: Node3D):
 	main = owner
 
 func handle_pointer_interaction():
 	var active_raycast = main.hand_raycast if main.is_xr_active else main.mouse_raycast
+	pointer_on_ui = false
+
+	if main.is_xr_active and main.is_streaming and main.controller_mapper:
+		main.controller_mapper.check_toggle()
 
 	if main.is_xr_active and main.is_streaming:
 		var is_gripping = false
@@ -17,7 +22,8 @@ func handle_pointer_interaction():
 				is_gripping = main.right_hand.is_button_pressed("grip")
 			if not is_gripping:
 				is_gripping = main.right_hand.get_float("grip") > 0.2
-		if is_gripping and not main.was_right_clicking and main.right_click_cooldown <= 0.0:
+		var pad_blocking = main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
+		if not pad_blocking and is_gripping and not main.was_right_clicking and main.right_click_cooldown <= 0.0:
 			if active_raycast.is_colliding() and active_raycast.get_collider().get_parent() == main.screen_mesh:
 				var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 				var uv = main._hit_point_to_uv(hit_pos)
@@ -55,23 +61,38 @@ func handle_pointer_interaction():
 		main.set_comp_grab_bar_color(main.ui_viewport, Color(1, 1, 1, 0.8))
 	elif main.grabbed_node == main.virtual_keyboard:
 		main.set_comp_grab_bar_color(main.virtual_keyboard.viewport, Color(1, 1, 1, 0.8))
+	elif main.grabbed_node == main.virtual_gamepad:
+		main.set_comp_grab_bar_color(main.virtual_gamepad.viewport, Color(1, 1, 1, 0.8))
 	elif main.grabbed_corner_idx >= 0:
 		_set_corner_color(main.corner_handles[main.grabbed_corner_idx], Color.WHITE, 0.3)
 
 	var laser = main.get_node("%Laser")
 	laser.visible = main.is_xr_active
 	var on_screen = false
-	if active_raycast.is_colliding():
+	var tp_capturing = main.virtual_keyboard and main.virtual_keyboard.trackpad_active
+	var pad_mode_active = main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
+	if tp_capturing:
+		if main.contact_dot:
+			main.contact_dot.visible = false
+		if main.pointer_cursor:
+			main.pointer_cursor.visible = false
+		if main.comp_cursor:
+			main.comp_cursor.visible = false
+		laser.visible = false
+	if not tp_capturing and active_raycast.is_colliding():
 		var hit_point = main._get_steady_hit(active_raycast.get_collision_point())
 		var _col = active_raycast.get_collider()
 		var _par = _col.get_parent() if _col else null
 		on_screen = (_par == main.screen_mesh)
-		if main.cursor_mode == 0 or not on_screen:
+		var hide_on_screen = on_screen and pad_mode_active
+		if main.cursor_mode == 0 or not on_screen or hide_on_screen:
 			if main.contact_dot:
 				main.contact_dot.global_position = hit_point
-				main.contact_dot.visible = true
+				main.contact_dot.visible = not hide_on_screen
 			if main.pointer_cursor:
 				main.pointer_cursor.visible = false
+			if main.comp_cursor and hide_on_screen:
+				main.comp_cursor.visible = false
 		else:
 			if main.pointer_cursor:
 				main.pointer_cursor.global_position = hit_point
@@ -94,6 +115,13 @@ func handle_pointer_interaction():
 	if active_raycast.is_colliding():
 		var collider = active_raycast.get_collider()
 		var parent = collider.get_parent()
+		pointer_on_ui = false
+		if parent == main.ui_panel_3d or (main.ui_visible and parent == main.get_node("%ScreenGrabBar")):
+			pointer_on_ui = true
+		if main.virtual_keyboard and main.virtual_keyboard.visible and parent == main.virtual_keyboard.mesh_instance:
+			pointer_on_ui = true
+		if main.virtual_gamepad and main.virtual_gamepad.visible and parent == main.virtual_gamepad.mesh_instance:
+			pointer_on_ui = true
 
 		if parent == main.get_node("%ScreenGrabBar") and parent != main.grabbed_bar:
 			_set_grab_bar_color(parent, Color.WHITE, 0.1)
@@ -192,6 +220,45 @@ func handle_pointer_interaction():
 					main.was_clicking = false
 			return
 
+		if main.virtual_gamepad and main.virtual_gamepad.visible and parent == main.virtual_gamepad.mesh_instance:
+			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
+			var local_pos = main.virtual_gamepad.mesh_instance.to_local(hit_pos)
+			var half_w = main.virtual_gamepad.mesh_size.x / 2.0
+			var half_h = main.virtual_gamepad.mesh_size.y / 2.0
+			var nx = (local_pos.x / half_w + 1.0) / 2.0
+			var ny = 1.0 - (local_pos.y / half_h + 1.0) / 2.0
+			var pixel_pos = Vector2(nx * main.virtual_gamepad.viewport_size.x, ny * main.virtual_gamepad.viewport_size.y)
+
+			var is_gp_grab = _is_gp_grab_bar(pixel_pos)
+			if main.grabbed_node == main.virtual_gamepad:
+				main.set_comp_grab_bar_color(main.virtual_gamepad.viewport, Color(1, 1, 1, 0.8))
+			elif is_gp_grab and main.grabbed_corner_idx < 0:
+				main.set_comp_grab_bar_color(main.virtual_gamepad.viewport, Color(1, 1, 1, 0.25))
+				if is_now_clicking and not main.was_clicking:
+					main.grabbed_node = main.virtual_gamepad
+					main.grabbed_bar = null
+					main.grab_distance = (hit_pos - active_raycast.global_position).length()
+					main.grab_offset = main.grabbed_node.global_position - hit_pos
+					main.grab_start_hand_pos = active_raycast.global_position
+					main.grab_start_node_pos = main.grabbed_node.global_position
+					main.grab_forward = -active_raycast.global_transform.basis.z
+					if main.is_xr_active:
+						main.grab_start_hand_basis = active_raycast.global_transform.basis
+						main.grab_start_node_basis = main.grabbed_node.global_transform.basis
+						main.grab_start_node_euler = main.grabbed_node.rotation
+					main.was_clicking = true
+					return
+			else:
+				main.set_comp_grab_bar_color(main.virtual_gamepad.viewport, Color(1, 1, 1, 0.08))
+
+			if not is_gp_grab:
+				main.virtual_gamepad.handle_pointer(pixel_pos, is_now_clicking, main.was_clicking)
+				if is_now_clicking:
+					main.was_clicking = true
+				else:
+					main.was_clicking = false
+			return
+
 		elif parent == main.screen_mesh and not main.is_streaming:
 			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var uv = main._hit_point_to_uv(hit_pos)
@@ -223,6 +290,10 @@ func handle_pointer_interaction():
 			return
 
 		elif parent == main.screen_mesh and main.is_streaming:
+			if main.virtual_keyboard and main.virtual_keyboard.trackpad_active:
+				return
+			if main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD:
+				return
 			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var uv = main._hit_point_to_uv(hit_pos)
 			var uv_x = uv.x
@@ -473,6 +544,8 @@ func _compute_parallax_shift(uv_x: float) -> float:
 func handle_scroll():
 	if not main.is_xr_active or not main.is_streaming:
 		return
+	if main.controller_mapper and main.controller_mapper.is_active():
+		return
 	var right_stick_y = 0.0
 	if main.right_hand:
 		right_stick_y = main.right_hand.get_vector2("primary").y
@@ -482,8 +555,8 @@ func handle_scroll():
 			if absf(val) > 0.1:
 				right_stick_y = val
 				break
-	if absf(right_stick_y) > 0.3:
-		var clicks = int(right_stick_y * 1.5)
+	if absf(right_stick_y) > 0.4:
+		var clicks = int(right_stick_y * 0.8)
 		if clicks != 0:
 			main.stream_backend.send_scroll_event(clicks)
 
@@ -498,6 +571,15 @@ func _is_kb_grab_bar(pixel_pos: Vector2) -> bool:
 	if not main.virtual_keyboard or not main.virtual_keyboard.viewport:
 		return false
 	var bar = main.virtual_keyboard.viewport.find_child("CompGrabBar", true, false)
+	if not bar or not bar is Control:
+		return false
+	var bar_rect = bar.get_global_rect()
+	return pixel_pos.x >= bar_rect.position.x and pixel_pos.x <= bar_rect.end.x and pixel_pos.y >= bar_rect.position.y and pixel_pos.y <= bar_rect.end.y
+
+func _is_gp_grab_bar(pixel_pos: Vector2) -> bool:
+	if not main.virtual_gamepad or not main.virtual_gamepad.viewport:
+		return false
+	var bar = main.virtual_gamepad.viewport.find_child("CompGrabBar", true, false)
 	if not bar or not bar is Control:
 		return false
 	var bar_rect = bar.get_global_rect()

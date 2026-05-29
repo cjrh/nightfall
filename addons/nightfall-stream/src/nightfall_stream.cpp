@@ -47,6 +47,8 @@ void NightfallStream::_ready() {
     stream_connection_->connect("connection_status_update", callable_mp(this, &NightfallStream::_on_connection_status_update));
     stream_connection_->connect("log_message", callable_mp(this, &NightfallStream::_on_log_message));
     stream_connection_->connect("h264_hw_upgraded", callable_mp(this, &NightfallStream::_on_h264_hw_upgraded));
+    stream_connection_->connect("controller_rumble", callable_mp(this, &NightfallStream::_on_controller_rumble));
+    stream_connection_->connect("controller_trigger_rumble", callable_mp(this, &NightfallStream::_on_controller_trigger_rumble));
 }
 
 void NightfallStream::_process(double /*delta*/) {
@@ -294,6 +296,14 @@ void NightfallStream::_on_h264_hw_upgraded() {
     emit_signal("h264_hw_upgraded");
 }
 
+void NightfallStream::_on_controller_rumble(int controller, int low_freq, int high_freq) {
+    emit_signal("controller_rumble", controller, low_freq, high_freq);
+}
+
+void NightfallStream::_on_controller_trigger_rumble(int controller, int left_motor, int right_motor) {
+    emit_signal("controller_trigger_rumble", controller, left_motor, right_motor);
+}
+
 void NightfallStream::_attempt_reconnect() {
     reconnect_attempts_++;
 
@@ -407,4 +417,6 @@ void NightfallStream::_bind_methods() {
     ADD_SIGNAL(MethodInfo("pair_completed", PropertyInfo(Variant::BOOL, "success"), PropertyInfo(Variant::STRING, "message")));
     ADD_SIGNAL(MethodInfo("log_message", PropertyInfo(Variant::STRING, "message")));
     ADD_SIGNAL(MethodInfo("h264_hw_upgraded"));
+    ADD_SIGNAL(MethodInfo("controller_rumble", PropertyInfo(Variant::INT, "controller"), PropertyInfo(Variant::INT, "low_freq"), PropertyInfo(Variant::INT, "high_freq")));
+    ADD_SIGNAL(MethodInfo("controller_trigger_rumble", PropertyInfo(Variant::INT, "controller"), PropertyInfo(Variant::INT, "left_motor"), PropertyInfo(Variant::INT, "right_motor")));
 }
