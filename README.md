@@ -24,10 +24,13 @@ passthrough, and AI depth estimation, all built native on Godot 4.7 and OpenXR.
 - **VR-native streaming** - floating screen in 3D space with grab bars, corner resize, and curvature options
 - **HEVC hardware decoding** - NDK MediaCodec pipeline for low-latency H.265 on Quest 3/3S; VAAPI HEVC decode on Linux
 - **AI Stereoscopic 3D** - real-time AI depth conversion via MiDaS turns any 2D game into stereoscopic 3D, no server-side setup required (Quest only)
-- **SBS support** - Stretch and Crop modes for native side-by-side 3D content
+- **SBS support** - Stretch and Crop modes for native side-by-side 3D content; quick-toggle via right thumbstick click
+- **Controller mapping** - PAD mode maps Quest controllers to a virtual gamepad; KBM mode keeps the pointer for mouse aim while binding movement to WASD and actions to keyboard keys
+- **Virtual keyboard with trackpad** - floating keyboard for text input, plus an integrated trackpad for relative mouse control with trigger/grip for left/right click
+- **Head-angle-aware positioning** - screen, menu, and keyboard position relative to where you're looking; works standing, sitting, or lying down
 - **Shader smoothing & sharpening** - Gaussian blur plus CAS adaptive sharpening on the stream
 - **Flexible stream configuration** - resolution presets (720p–4K including 4:3 and 21:9), 30–120 FPS, auto or manual bitrate, auto display refresh rate matching
-- **Touch-style pointer** - laser pointer with trigger-to-click, grip for right-click, thumbstick scroll; circle or arrow cursor
+- **Touch-style pointer** - laser pointer with trigger-to-click, grip for right-click, thumbstick scroll; circle or arrow cursor with optional steady mode
 - **Passthrough** - see your real room with the stream floating in front of you
 - **Curved screen** - toggle curvature from the menu; flat, slight curve, or full wrap with optional bezel
 - **Quest Touch Plus models** - real controller models instead of placeholder boxes (Quest only)
@@ -55,11 +58,10 @@ Beyond gaming there is potential for Nightfall to become a useful streaming clie
 - **SBS auto-detection** - automatically detect side-by-side content and switch modes, then restore previous setting when SBS ends
 - **SBS mouse tracking** - resolve pointer positioning in SBS mode; evaluate ReShade filter integration or build a native solution
 - **Hand-tracked input devices** - use Quest hand tracking to track physical keyboard and mouse position; upload controller/keyboard/mouse 3D models for visual representation
-- **Keyboard layout templates** - pre-built keyboard layouts for common configurations; a keyboard is a keyboard, same as a mouse
+- **Custom controller profiles** - per-game keyboard and controller remapping UI for both PAD and KBM modes
 - **Additional environments** - new background scenes beyond the default
 - **SBS game menu** - an in-VR game launcher for SBS content, paired with a companion PC app for managing game shortcuts
 - **Server processing layer** - a companion app running on the Sunshine server that offloads processing from the headset, similar to WiVRn's architecture; potential for significant quality and performance gains
-- **Fake gamepad** - controller input emulation for scenarios where gamepad input is preferred over mouse/keyboard
 
 ## Usage and Requirements
 
@@ -103,8 +105,49 @@ Setup:
 | **Right thumbstick Y** | Scroll |
 | **B button** | Toggle menu |
 | **A button** | Toggle keyboard |
-| **Grab bars** | Drag to reposition screen/menu |
-| **Corner handles** | Resize screen (locked 16:9) |
+| **Right thumbstick click** | Cycle SBS mode (Off → Stretch → Crop) |
+| **Both thumbstick clicks** | Toggle controller mapper on/off |
+| **Grab bars** | Drag to reposition screen, menu, or keyboard |
+| **Corner handles** | Resize screen (locked aspect ratio) |
+
+#### Controller Modes
+
+Toggle the controller mapper with **both thumbstick clicks** or the **Ctrl** button in the menu. Cycle between PAD and KBM with the **Type** button.
+
+**PAD mode** - Quest controllers become a virtual gamepad:
+| Input | Action |
+|---|---|
+| **Thumbsticks** | Left/right stick |
+| **Triggers** | Left/right trigger |
+| **Grips** | Left/right bumper |
+| **A/B/X/Y** | Face buttons (D-pad when controllers near head) |
+| **Menu buttons** | Start / Back |
+
+**KBM mode** - Mouse pointer stays active, buttons map to keyboard:
+| Input | Action |
+|---|---|
+| **Left thumbstick** | WASD movement |
+| **Left trigger** | Shift |
+| **Left grip** | Ctrl |
+| **A** | Space |
+| **B** | R |
+| **X** | E |
+| **Y** | F |
+| **Left menu** | Esc |
+| **Right menu** | Tab |
+| **Right thumbstick Y** | Scroll |
+
+#### Keyboard Trackpad
+
+The keyboard includes an integrated trackpad on the right side. Point at the trackpad area and **click trigger** to activate. While active:
+
+| Input | Action |
+|---|---|
+| **Move controller** | Relative mouse movement |
+| **Trigger** | Left-click |
+| **Grip** | Right-click |
+| **Thumbstick Y** | Scroll |
+| **Right thumbstick click** | Exit trackpad |
 
 ## Building
 
