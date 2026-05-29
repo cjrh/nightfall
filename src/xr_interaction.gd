@@ -251,6 +251,7 @@ func handle_pointer_interaction():
 			if main.virtual_keyboard and main.virtual_keyboard.trackpad_active:
 				return
 			if main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD:
+				return
 			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var uv = main._hit_point_to_uv(hit_pos)
 			var uv_x = uv.x

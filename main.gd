@@ -179,6 +179,7 @@ var _ui_codec_btn: Button
 var _ui_exit_btn: Button
 var _ui_disconnect_btn: Button
 var _ui_close_btn: Button
+var _ui_center_btn: Button
 
 var _btn_style: StyleBoxFlat
 var _btn_hover: StyleBoxFlat
@@ -1375,6 +1376,7 @@ func _toggle_ui():
 
 var _ui_saved_offset: Vector3 = Vector3.ZERO
 var _ui_saved_rot_y: float = 0.0
+var _ui_saved_rot_x: float = 0.0
 var _ui_has_saved_offset: bool = false
 
 func _set_ui_visible(vis: bool):
@@ -1384,16 +1386,24 @@ func _set_ui_visible(vis: bool):
 		area.process_mode = Node.PROCESS_MODE_INHERIT if vis else Node.PROCESS_MODE_DISABLED
 	if is_xr_active and vis:
 		var cam_pos = xr_camera.global_position
-		var ui_to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
 		if _ui_has_saved_offset:
 			ui_panel_3d.global_position = screen_mesh.global_position + screen_mesh.global_transform.basis * _ui_saved_offset
-			ui_to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
-		ui_panel_3d.rotation.y = atan2(ui_to_cam.x, ui_to_cam.z)
-		ui_panel_3d.rotation.x = -0.26
-		_ui_has_saved_offset = true
+			ui_panel_3d.rotation.y = screen_mesh.global_rotation.y + _ui_saved_rot_y
+			ui_panel_3d.rotation.x = _ui_saved_rot_x
+		else:
+			var cam_fwd = -xr_camera.global_transform.basis.z
+			var cam_right = xr_camera.global_transform.basis.x
+			var cam_up = xr_camera.global_transform.basis.y
+			ui_panel_3d.global_position = cam_pos + cam_fwd * 0.8 - cam_right * 0.5 - cam_up * 0.2
+			var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
+			ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
+			ui_panel_3d.rotation.x = -0.26
+			_ui_has_saved_offset = true
 	elif is_xr_active:
 		var scr_basis = screen_mesh.global_transform.basis.inverse()
 		_ui_saved_offset = scr_basis * (ui_panel_3d.global_position - screen_mesh.global_position)
+		_ui_saved_rot_y = ui_panel_3d.rotation.y - screen_mesh.global_rotation.y
+		_ui_saved_rot_x = ui_panel_3d.rotation.x
 		_ui_has_saved_offset = true
 
 func _trigger_haptic(_controller: int, low_freq: int, high_freq: int):
@@ -1412,21 +1422,23 @@ func _reposition_screen_and_ui():
 	var cam_fwd = -xr_camera.global_transform.basis.z
 	var cam_right = xr_camera.global_transform.basis.x
 	var cam_yaw = atan2(-cam_fwd.x, -cam_fwd.z)
-	var fwd_flat = Vector3(-sin(cam_yaw), 0, -cos(cam_yaw)).normalized()
-	var right_flat = Vector3(cos(cam_yaw), 0, -sin(cam_yaw)).normalized()
-	var floor_y = xr_origin.global_position.y
-	screen_mesh.global_position = cam_pos + fwd_flat * 1.8
-	screen_mesh.global_position.y = floor_y + 1.3
+	screen_mesh.global_position = cam_pos + cam_fwd * 1.8
 	screen_mesh.rotation = Vector3.ZERO
 	screen_mesh.rotation.y = cam_yaw
 	if (comp_cylinder and comp_cylinder.visible) or (comp_cylinder_left and comp_cylinder_left.visible):
 		_update_cylinder_params()
-	ui_panel_3d.global_position = cam_pos + fwd_flat * 0.9 - right_flat * 0.8
-	ui_panel_3d.global_position.y = floor_y + 1.1
-	ui_panel_3d.rotation = Vector3.ZERO
-	ui_panel_3d.rotation.y = cam_yaw
-	ui_panel_3d.rotation.x = -0.26
-	_log("[POS] Screen at %s, UI at %s, Cam at %s floor_y=%s" % [str(screen_mesh.global_position), str(ui_panel_3d.global_position), str(cam_pos), str(floor_y)])
+	_log("[POS] Screen at %s, Cam at %s" % [str(screen_mesh.global_position), str(cam_pos)])
+
+func _reset_positions():
+	if ui_visible:
+		_toggle_ui()
+	if virtual_keyboard and virtual_keyboard.visible:
+		virtual_keyboard.toggle()
+	_ui_has_saved_offset = false
+	if virtual_keyboard:
+		virtual_keyboard.reset_position()
+	_reposition_screen_and_ui()
+	state_manager.save_state()
 
 func _load_controller_models():
 	var left_scene = load("res://models/controllers/MetaQuestTouchPlus_Left.fbx")
