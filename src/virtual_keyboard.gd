@@ -498,7 +498,7 @@ func toggle():
 			var cam_pos = main.xr_camera.global_position
 			var cam_fwd = -main.xr_camera.global_transform.basis.z
 			var cam_up = main.xr_camera.global_transform.basis.y
-			global_position = cam_pos + cam_fwd * 0.7 - cam_up * 0.4
+			global_position = cam_pos + cam_fwd * 0.9 - cam_up * 0.4
 			var to_cam = (cam_pos - global_position).normalized()
 			rotation.y = atan2(to_cam.x, to_cam.z)
 			rotation.x = -PI / 4.0
@@ -510,6 +510,7 @@ func toggle():
 		area.monitorable = new_vis
 		area.monitoring = new_vis
 	if not new_vis:
+		_save_offset()
 		_deactivate_trackpad()
 
 func reset_position():

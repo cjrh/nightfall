@@ -1394,7 +1394,7 @@ func _set_ui_visible(vis: bool):
 			var cam_fwd = -xr_camera.global_transform.basis.z
 			var cam_right = xr_camera.global_transform.basis.x
 			var cam_up = xr_camera.global_transform.basis.y
-			ui_panel_3d.global_position = cam_pos + cam_fwd * 0.8 - cam_right * 0.5 - cam_up * 0.2
+			ui_panel_3d.global_position = cam_pos + cam_fwd * 0.8 - cam_right * 0.8 - cam_up * 0.2
 			var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
 			ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
 			ui_panel_3d.rotation.x = -0.26
