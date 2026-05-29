@@ -502,7 +502,8 @@ func handle_scroll():
 	if not main.is_xr_active or not main.is_streaming:
 		return
 	if main.controller_mapper and main.controller_mapper.is_active():
-		return
+		if main.controller_mapper.ctrl_type != ControllerMapper.CtrlType.KBMOUSE:
+			return
 	if main.virtual_keyboard and main.virtual_keyboard.trackpad_active:
 		return
 	var right_stick_y = 0.0

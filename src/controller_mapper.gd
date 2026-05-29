@@ -1,12 +1,12 @@
 class_name ControllerMapper
 extends Node
 
-enum CtrlType { GAMEPAD, KEYBOARD }
+enum CtrlType { GAMEPAD, KEYBOARD, KBMOUSE }
 
 var main: Node3D
 var active: bool = false
 var ctrl_type: int = CtrlType.GAMEPAD
-var type_labels: Array = ["PAD", "KBD"]
+var type_labels: Array = ["PAD", "PAD", "KBM"]
 
 var _active_key_dirs: Dictionary = {}
 var _prev_button_flags: int = 0
@@ -42,12 +42,29 @@ var _KBD_DEFAULT = {
 	"right_menu": KEY_ENTER,
 }
 
+var _KBM_DEFAULT = {
+	"left_up": KEY_W,
+	"left_down": KEY_S,
+	"left_left": KEY_A,
+	"left_right": KEY_D,
+	"right_a": KEY_SPACE,
+	"right_b": KEY_R,
+	"left_x": KEY_E,
+	"left_y": KEY_F,
+	"left_trigger": KEY_SHIFT,
+	"left_grip": KEY_CTRL,
+	"left_menu": KEY_ESCAPE,
+	"right_menu": KEY_TAB,
+}
+
 var _kbd_profile: Dictionary = {}
+var _kbm_profile: Dictionary = {}
 var _kb_held: Dictionary = {}
 
 func _init(owner: Node3D):
 	main = owner
 	_kbd_profile = _KBD_DEFAULT.duplicate()
+	_kbm_profile = _KBM_DEFAULT.duplicate()
 
 func _process(_delta):
 	if not main.is_streaming or not main.is_xr_active or not active:
@@ -63,6 +80,8 @@ func _process(_delta):
 		_send_controller_mode()
 	elif ctrl_type == CtrlType.KEYBOARD:
 		_send_keyboard_mode()
+	elif ctrl_type == CtrlType.KBMOUSE:
+		_send_kbm_mode()
 
 func check_toggle():
 	if not main.is_xr_active:
@@ -129,7 +148,9 @@ func _deactivate():
 		main.ui_controller.update_ctrl_mode_btn()
 
 func cycle_type():
-	ctrl_type = (ctrl_type + 1) % 2
+	ctrl_type = (ctrl_type + 1) % 3
+	if ctrl_type == CtrlType.KEYBOARD:
+		ctrl_type = CtrlType.KBMOUSE
 	if active:
 		_deactivate_silent()
 		if ctrl_type == CtrlType.GAMEPAD:
@@ -263,6 +284,31 @@ func _send_keyboard_mode():
 	_handle_button_key(main.left_hand.is_button_pressed("by_button") if main.left_hand else false, "left_y", _kbd_profile.get("left_y", KEY_4))
 	_handle_button_key(main.left_hand.is_button_pressed("menu_button") if main.left_hand else false, "left_menu", _kbd_profile.get("left_menu", KEY_ESCAPE))
 	_handle_button_key(main.right_hand.is_button_pressed("menu_button") if main.right_hand else false, "right_menu", _kbd_profile.get("right_menu", KEY_ENTER))
+
+func _send_kbm_mode():
+	var lv = main.left_hand.get_vector2("primary") if main.left_hand else Vector2.ZERO
+	var stick_threshold = 0.5
+	var profile = _kbm_profile
+
+	_handle_thumbstick_key(lv.y < -stick_threshold, "left_up", profile.get("left_up", KEY_W))
+	_handle_thumbstick_key(lv.y > stick_threshold, "left_down", profile.get("left_down", KEY_S))
+	_handle_thumbstick_key(lv.x < -stick_threshold, "left_left", profile.get("left_left", KEY_A))
+	_handle_thumbstick_key(lv.x > stick_threshold, "left_right", profile.get("left_right", KEY_D))
+
+	var trigger_threshold = 0.5
+	var lt = main.left_hand.get_float("trigger") if main.left_hand else 0.0
+	_handle_analog_key(lt > trigger_threshold, "left_trigger", profile.get("left_trigger", KEY_SHIFT))
+
+	var grip_threshold = 0.5
+	var lg = main.left_hand.get_float("grip") if main.left_hand else 0.0
+	_handle_analog_key(lg > grip_threshold, "left_grip", profile.get("left_grip", KEY_CTRL))
+
+	_handle_button_key(main.right_hand.is_button_pressed("ax_button") if main.right_hand else false, "right_a", profile.get("right_a", KEY_SPACE))
+	_handle_button_key(main.right_hand.is_button_pressed("by_button") if main.right_hand else false, "right_b", profile.get("right_b", KEY_R))
+	_handle_button_key(main.left_hand.is_button_pressed("ax_button") if main.left_hand else false, "left_x", profile.get("left_x", KEY_E))
+	_handle_button_key(main.left_hand.is_button_pressed("by_button") if main.left_hand else false, "left_y", profile.get("left_y", KEY_F))
+	_handle_button_key(main.left_hand.is_button_pressed("menu_button") if main.left_hand else false, "left_menu", profile.get("left_menu", KEY_ESCAPE))
+	_handle_button_key(main.right_hand.is_button_pressed("menu_button") if main.right_hand else false, "right_menu", profile.get("right_menu", KEY_TAB))
 
 func _handle_thumbstick_key(active: bool, dir_id: String, keycode: int):
 	if active and not _active_key_dirs.get(dir_id, false):

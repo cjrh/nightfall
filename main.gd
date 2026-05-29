@@ -45,6 +45,7 @@ var was_right_clicking: bool = false
 var right_click_cooldown: float = 0.0
 var _was_b_pressed: bool = false
 var _was_a_pressed: bool = false
+var _was_r_stick_click: bool = false
 var _startup_reposition: bool = true
 var mouse_captured_by_stream: bool = false
 var suppress_input_frames: int = 0
@@ -1261,6 +1262,16 @@ func _process(delta):
 			if a_pressed and not _was_a_pressed:
 				virtual_keyboard.toggle()
 			_was_a_pressed = a_pressed
+			var r_stick_click = right_hand.is_button_pressed("primary_click")
+			var l_stick_click = left_hand.is_button_pressed("primary_click") if left_hand else false
+			if r_stick_click and not _was_r_stick_click and not l_stick_click:
+				var tp_exited = virtual_keyboard and virtual_keyboard.thumbstick_exit_flag
+				if not virtual_keyboard or (not virtual_keyboard.trackpad_active and not tp_exited):
+					settings_controller.cycle_sbs_mode()
+			if not r_stick_click:
+				if virtual_keyboard:
+					virtual_keyboard.thumbstick_exit_flag = false
+			_was_r_stick_click = r_stick_click
 		if _startup_reposition:
 			if xr_camera.global_position.length_squared() > 0.01:
 				_reposition_screen_and_ui()

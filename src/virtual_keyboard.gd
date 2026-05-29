@@ -30,6 +30,7 @@ var _tp_hint_label: Label = null
 var _tp_left_clicking: bool = false
 var _tp_right_clicking: bool = false
 var _tp_was_stick_click: bool = false
+var thumbstick_exit_flag: bool = false
 
 var _KEY_ROWS = [
 	[{"k": KEY_ESCAPE, "l": "Esc", "w": 1.5}, {"k": KEY_F1, "l": "F1"}, {"k": KEY_F2, "l": "F2"}, {"k": KEY_F3, "l": "F3"}, {"k": KEY_F4, "l": "F4"}, {"k": KEY_F5, "l": "F5"}, {"k": KEY_F6, "l": "F6"}, {"k": KEY_F7, "l": "F7"}, {"k": KEY_F8, "l": "F8"}, {"k": KEY_F9, "l": "F9"}, {"k": KEY_F10, "l": "F10"}, {"k": KEY_F11, "l": "F11"}, {"k": KEY_F12, "l": "F12"}, {"k": KEY_DELETE, "l": "Del", "w": 1.5}],
@@ -357,6 +358,7 @@ func _process(_delta):
 		var stick_click = main.right_hand.is_button_pressed("primary_click")
 		if stick_click and not _tp_was_stick_click:
 			_deactivate_trackpad()
+			thumbstick_exit_flag = true
 			_tp_was_stick_click = stick_click
 			return
 		_tp_was_stick_click = stick_click
