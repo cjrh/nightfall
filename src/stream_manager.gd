@@ -276,4 +276,8 @@ func update_stats():
 	txt += " \u2022 " + str(int(refresh_hz)) + "Hz \u2022 " + str(int(main.stats_fps)) + "fps"
 	if dropped > 0:
 		txt += " \u2022 drop:" + str(dropped)
+	if main.controller_mapper and main.controller_mapper.is_active():
+		txt += " \u2022 " + main.controller_mapper.get_mode_label()
+		if main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD and main.controller_mapper.get_close_to_head():
+			txt += " D-PAD"
 	main._ui_status_label.text = txt

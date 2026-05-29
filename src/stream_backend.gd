@@ -122,6 +122,10 @@ func send_multi_controller_event(device: int, active_mask: int, buttons: int, lt
 	if _v2:
 		_v2.get_input_bridge().send_multi_controller_event(device, active_mask, buttons, lt, rt, lx, ly, rx, ry)
 
+func send_controller_arrival(device: int, active_mask: int, ctype: int, button_flags: int, capabilities: int):
+	if _v2:
+		_v2.get_input_bridge().send_controller_arrival(device, active_mask, ctype, button_flags, capabilities)
+
 func get_decoder_name() -> String:
 	if _v2:
 		return _v2.get_decoder_name()

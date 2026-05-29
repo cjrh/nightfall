@@ -114,6 +114,33 @@ func build_ui():
 	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(top_row)
 
+	main._ui_center_btn = Button.new()
+	main._ui_center_btn.text = "\u25C9"
+	main._ui_center_btn.focus_mode = Control.FOCUS_NONE
+	main._ui_center_btn.custom_minimum_size = Vector2(30, 18)
+	main._ui_center_btn.add_theme_font_size_override("font_size", 11)
+	main._ui_center_btn.add_theme_color_override("font_color", Color(0.5, 0.7, 1.0, 0.6))
+	main._ui_center_btn.add_theme_color_override("font_hover_color", Color(0.6, 0.8, 1.0, 1.0))
+	var center_style = main._btn_style.duplicate()
+	center_style.content_margin_left = 10
+	center_style.content_margin_right = 10
+	center_style.content_margin_top = 2
+	center_style.content_margin_bottom = 2
+	center_style.set_corner_radius_all(0)
+	center_style.set_corner_radius(CORNER_TOP_LEFT, 10)
+	var center_hover = main._btn_hover.duplicate()
+	center_hover.content_margin_left = 10
+	center_hover.content_margin_right = 10
+	center_hover.content_margin_top = 2
+	center_hover.content_margin_bottom = 2
+	center_hover.bg_color = Color(0.2, 0.5, 0.86, 0.3)
+	center_hover.set_corner_radius_all(0)
+	center_hover.set_corner_radius(CORNER_TOP_LEFT, 10)
+	main._ui_center_btn.add_theme_stylebox_override("normal", center_style)
+	main._ui_center_btn.add_theme_stylebox_override("hover", center_hover)
+	main._ui_center_btn.add_theme_stylebox_override("pressed", center_hover)
+	top_row.add_child(main._ui_center_btn)
+
 	main._ui_host_label = Label.new()
 	main._ui_host_label.name = "HostLabel"
 	main._ui_host_label.add_theme_font_size_override("font_size", 13)
@@ -280,9 +307,10 @@ func build_ui():
 	row3.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(row3)
 
-	main._ui_wide_btn = make_option_btn("Wide", "Off")
-	main._ui_wide_btn.disabled = true
-	row3.add_child(main._ui_wide_btn)
+	main._ui_ctrl_mode_btn = make_option_btn("Ctrl", "Off")
+	row3.add_child(main._ui_ctrl_mode_btn)
+	main._ui_ctrl_type_btn = make_option_btn("Type", "PAD")
+	row3.add_child(main._ui_ctrl_type_btn)
 	main._ui_sbs_btn = make_option_btn("SBS", "Off")
 	row3.add_child(main._ui_sbs_btn)
 	main._ui_3d_btn = make_option_btn("3D AI", "2D")
@@ -340,6 +368,7 @@ func build_ui():
 	main._ui_exit_btn.button_down.connect(func(): main.exit_app())
 	main._ui_disconnect_btn.button_down.connect(func(): main.disconnect_stream())
 	main._ui_close_btn.button_down.connect(func(): main._toggle_ui())
+	main._ui_center_btn.button_down.connect(func(): main._reset_positions())
 	main._ui_disconnect_btn.visible = main.is_streaming
 	main._ui_pt_btn.button_down.connect(func(): main.settings_controller.toggle_passthrough())
 	main._ui_curve_btn.button_down.connect(func(): main.screen_manager.cycle_curvature())
@@ -349,12 +378,15 @@ func build_ui():
 	main._ui_res_btn.button_down.connect(func(): main.settings_controller.cycle_resolution())
 	main._ui_fps_btn.button_down.connect(func(): main.settings_controller.cycle_fps())
 	main._ui_bitrate_btn.button_down.connect(func(): main.settings_controller.cycle_bitrate())
-	main._ui_wide_btn.button_down.connect(func(): main.settings_controller.cycle_double_h())
 	main._ui_render_btn.button_down.connect(func(): main.settings_controller.cycle_smooth_mode())
 	main._ui_sharpen_btn.button_down.connect(func(): main.settings_controller.cycle_sharpen_mode())
 	main._ui_cursor_btn.button_down.connect(func(): main.settings_controller.cycle_cursor_mode())
 	main._ui_steady_btn.button_down.connect(func(): main.settings_controller.cycle_steady())
 	main._ui_codec_btn.button_down.connect(func(): main.settings_controller.cycle_codec())
+	main._ui_ctrl_mode_btn.button_down.connect(func(): main.controller_mapper.check_toggle_ui())
+	main._ui_ctrl_type_btn.button_down.connect(func(): main.controller_mapper.cycle_type())
+	update_ctrl_mode_btn()
+	update_ctrl_type_btn()
 
 	update_host_label()
 
@@ -381,6 +413,14 @@ func update_option_btn(btn: Button, value: String):
 
 func update_codec_btn():
 	main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[main.codec_preference])
+
+func update_ctrl_mode_btn():
+	if main._ui_ctrl_mode_btn and main.controller_mapper:
+		update_option_btn(main._ui_ctrl_mode_btn, main.controller_mapper.get_mode_label())
+
+func update_ctrl_type_btn():
+	if main._ui_ctrl_type_btn and main.controller_mapper:
+		update_option_btn(main._ui_ctrl_type_btn, main.controller_mapper.type_labels[main.controller_mapper.ctrl_type])
 
 func update_host_label():
 	if not main.is_streaming:

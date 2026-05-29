@@ -45,6 +45,7 @@ var was_right_clicking: bool = false
 var right_click_cooldown: float = 0.0
 var _was_b_pressed: bool = false
 var _was_a_pressed: bool = false
+var _was_r_stick_click: bool = false
 var _startup_reposition: bool = true
 var mouse_captured_by_stream: bool = false
 var suppress_input_frames: int = 0
@@ -123,6 +124,7 @@ var screen_manager: ScreenManager
 var settings_controller: SettingsController
 var state_manager: StateManager
 var host_discovery: HostDiscovery
+var controller_mapper: ControllerMapper
 
 var comp_cylinder: Node3D = null
 var _comp_cyl_center := Vector3.ZERO
@@ -167,15 +169,17 @@ var _ui_3d_btn: Button
 var _ui_res_btn: Button
 var _ui_fps_btn: Button
 var _ui_bitrate_btn: Button
-var _ui_wide_btn: Button
+var _ui_ctrl_type_btn: Button
 var _ui_render_btn: Button
 var _ui_sharpen_btn: Button
+var _ui_ctrl_mode_btn: Button
 var _ui_cursor_btn: Button
 var _ui_steady_btn: Button
 var _ui_codec_btn: Button
 var _ui_exit_btn: Button
 var _ui_disconnect_btn: Button
 var _ui_close_btn: Button
+var _ui_center_btn: Button
 
 var _btn_style: StyleBoxFlat
 var _btn_hover: StyleBoxFlat
@@ -673,43 +677,48 @@ func _update_cursor_layer():
 		return
 	var active_raycast = hand_raycast if is_xr_active else mouse_raycast
 	var on_screen = false
+	var pad_on_screen = controller_mapper and controller_mapper.is_active() and controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
+	var tp_capturing = virtual_keyboard and virtual_keyboard.visible and virtual_keyboard.trackpad_active
 	if active_raycast.is_colliding():
 		var hit_point = _get_steady_hit(active_raycast.get_collision_point())
 		var col = active_raycast.get_collider()
 		var par = col.get_parent() if col else null
 		on_screen = (par == screen_mesh)
-		var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
-		var to_cam = (xr_camera.global_position - hit_point).normalized()
-		var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
-		var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
-		if cursor_mode == 0:
-			if pointer: pointer.visible = false
-			if circle: circle.visible = true
-			comp_cursor_viewport.size = Vector2i(256, 256)
-			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
-			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
-			comp_cursor.rotate_object_local(Vector3.UP, PI)
-		elif on_screen:
-			if pointer: pointer.visible = true
-			if circle: circle.visible = false
-			comp_cursor_viewport.size = Vector2i(40, 64)
-			comp_cursor.set_quad_size(Vector2(0.04, 0.064))
-			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
-			comp_cursor.rotate_object_local(Vector3.UP, PI)
-			var right = comp_cursor.global_transform.basis.x
-			var up = comp_cursor.global_transform.basis.y
-			comp_cursor.global_position += right * 0.02 - up * 0.032
+		if on_screen and (pad_on_screen or tp_capturing):
+			comp_cursor.visible = false
 		else:
-			if pointer: pointer.visible = false
-			if circle: circle.visible = true
-			comp_cursor_viewport.size = Vector2i(256, 256)
-			comp_cursor.set_quad_size(Vector2(0.035, 0.035))
-			comp_cursor.global_position = hit_point + surf_normal * 0.002
-			comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
-			comp_cursor.rotate_object_local(Vector3.UP, PI)
-		comp_cursor.visible = true
+			var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
+			var to_cam = (xr_camera.global_position - hit_point).normalized()
+			var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
+			var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
+			if cursor_mode == 0:
+				if pointer: pointer.visible = false
+				if circle: circle.visible = true
+				comp_cursor_viewport.size = Vector2i(256, 256)
+				comp_cursor.set_quad_size(Vector2(0.035, 0.035))
+				comp_cursor.global_position = hit_point + surf_normal * 0.002
+				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+				comp_cursor.rotate_object_local(Vector3.UP, PI)
+			elif on_screen:
+				if pointer: pointer.visible = true
+				if circle: circle.visible = false
+				comp_cursor_viewport.size = Vector2i(40, 64)
+				comp_cursor.set_quad_size(Vector2(0.04, 0.064))
+				comp_cursor.global_position = hit_point + surf_normal * 0.002
+				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+				comp_cursor.rotate_object_local(Vector3.UP, PI)
+				var right = comp_cursor.global_transform.basis.x
+				var up = comp_cursor.global_transform.basis.y
+				comp_cursor.global_position += right * 0.02 - up * 0.032
+			else:
+				if pointer: pointer.visible = false
+				if circle: circle.visible = true
+				comp_cursor_viewport.size = Vector2i(256, 256)
+				comp_cursor.set_quad_size(Vector2(0.035, 0.035))
+				comp_cursor.global_position = hit_point + surf_normal * 0.002
+				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
+				comp_cursor.rotate_object_local(Vector3.UP, PI)
+			comp_cursor.visible = true
 	else:
 		comp_cursor.visible = false
 	if pointer_cursor:
@@ -838,6 +847,8 @@ func _on_stream_started():
 	if starfield:
 		starfield.emitting = false
 		starfield.visible = false
+	var all_btn_flags = 0x1000|0x2000|0x4000|0x8000|0x0001|0x0002|0x0004|0x0008|0x0100|0x0200|0x0010|0x0020|0x0040|0x0080|0x0400
+	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
 
 func _switch_to_comp_layer():
 	if not comp_layer_available:
@@ -1031,6 +1042,8 @@ func _ready():
 	settings_controller = SettingsController.new(self)
 	state_manager = StateManager.new(self)
 	host_discovery = HostDiscovery.new(self)
+	controller_mapper = ControllerMapper.new(self)
+	add_child(controller_mapper)
 
 	if OS.get_name() == "Android":
 		depth_estimator.setup()
@@ -1084,10 +1097,19 @@ func _ready():
 	v2_node.stream_terminated.connect(func(err_code, err_msg):
 		_on_stream_terminated(err_msg)
 	)
-	v2_node.h264_hw_upgraded.connect(func():
-		_bind_yuv_textures()
-		_log("[H264] HW upgrade: re-bound YUV textures for NV12")
-	)
+	if v2_node.has_signal("h264_hw_upgraded"):
+		v2_node.h264_hw_upgraded.connect(func():
+			_bind_yuv_textures()
+			_log("[H264] HW upgrade: re-bound YUV textures for NV12")
+		)
+	if v2_node.has_signal("controller_rumble"):
+		v2_node.controller_rumble.connect(func(controller, low_freq, high_freq):
+			_trigger_haptic(controller, low_freq, high_freq)
+		)
+	if v2_node.has_signal("controller_trigger_rumble"):
+		v2_node.controller_trigger_rumble.connect(func(controller, left_motor, right_motor):
+			_trigger_haptic(controller, left_motor, right_motor)
+		)
 	v2_node.log_message.connect(func(msg):
 		if "dropped" in msg or "Unrecoverable" in msg or "Waiting for IDR" in msg:
 			stats_network_events += 1
@@ -1232,14 +1254,25 @@ func _process(delta):
 		_flush_log()
 
 	if is_xr_active:
-		var b_pressed = right_hand.is_button_pressed("by_button")
-		if b_pressed and not _was_b_pressed:
-			_toggle_ui()
-		_was_b_pressed = b_pressed
-		var a_pressed = right_hand.is_button_pressed("ax_button")
-		if a_pressed and not _was_a_pressed:
-			virtual_keyboard.toggle()
-		_was_a_pressed = a_pressed
+		if not controller_mapper or not controller_mapper.is_active():
+			var b_pressed = right_hand.is_button_pressed("by_button")
+			if b_pressed and not _was_b_pressed:
+				_toggle_ui()
+			_was_b_pressed = b_pressed
+			var a_pressed = right_hand.is_button_pressed("ax_button")
+			if a_pressed and not _was_a_pressed:
+				virtual_keyboard.toggle()
+			_was_a_pressed = a_pressed
+			var r_stick_click = right_hand.is_button_pressed("primary_click")
+			var l_stick_click = left_hand.is_button_pressed("primary_click") if left_hand else false
+			if r_stick_click and not _was_r_stick_click and not l_stick_click:
+				var tp_exited = virtual_keyboard and virtual_keyboard.thumbstick_exit_flag
+				if not virtual_keyboard or (not virtual_keyboard.trackpad_active and not tp_exited):
+					settings_controller.cycle_sbs_mode()
+			if not r_stick_click:
+				if virtual_keyboard:
+					virtual_keyboard.thumbstick_exit_flag = false
+			_was_r_stick_click = r_stick_click
 		if _startup_reposition:
 			if xr_camera.global_position.length_squared() > 0.01:
 				_reposition_screen_and_ui()
@@ -1343,6 +1376,7 @@ func _toggle_ui():
 
 var _ui_saved_offset: Vector3 = Vector3.ZERO
 var _ui_saved_rot_y: float = 0.0
+var _ui_saved_rot_x: float = 0.0
 var _ui_has_saved_offset: bool = false
 
 func _set_ui_visible(vis: bool):
@@ -1352,17 +1386,34 @@ func _set_ui_visible(vis: bool):
 		area.process_mode = Node.PROCESS_MODE_INHERIT if vis else Node.PROCESS_MODE_DISABLED
 	if is_xr_active and vis:
 		var cam_pos = xr_camera.global_position
-		var ui_to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
 		if _ui_has_saved_offset:
 			ui_panel_3d.global_position = screen_mesh.global_position + screen_mesh.global_transform.basis * _ui_saved_offset
-			ui_to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
-		ui_panel_3d.rotation.y = atan2(ui_to_cam.x, ui_to_cam.z)
-		ui_panel_3d.rotation.x = -0.26
-		_ui_has_saved_offset = true
+			ui_panel_3d.rotation.y = screen_mesh.global_rotation.y + _ui_saved_rot_y
+			ui_panel_3d.rotation.x = _ui_saved_rot_x
+		else:
+			var cam_fwd = -xr_camera.global_transform.basis.z
+			var cam_right = xr_camera.global_transform.basis.x
+			var cam_up = xr_camera.global_transform.basis.y
+			ui_panel_3d.global_position = cam_pos + cam_fwd * 0.8 - cam_right * 0.8 - cam_up * 0.2
+			var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
+			ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
+			ui_panel_3d.rotation.x = -0.26
+			_ui_has_saved_offset = true
 	elif is_xr_active:
 		var scr_basis = screen_mesh.global_transform.basis.inverse()
 		_ui_saved_offset = scr_basis * (ui_panel_3d.global_position - screen_mesh.global_position)
+		_ui_saved_rot_y = ui_panel_3d.rotation.y - screen_mesh.global_rotation.y
+		_ui_saved_rot_x = ui_panel_3d.rotation.x
 		_ui_has_saved_offset = true
+
+func _trigger_haptic(_controller: int, low_freq: int, high_freq: int):
+	var strength = clampf((low_freq + high_freq) / 510.0, 0.0, 1.0)
+	if strength < 0.01:
+		return
+	if right_hand:
+		right_hand.trigger_haptic_pulse("haptic", strength, 0.05)
+	if left_hand:
+		left_hand.trigger_haptic_pulse("haptic", strength, 0.05)
 
 func _reposition_screen_and_ui():
 	if not is_xr_active:
@@ -1371,21 +1422,23 @@ func _reposition_screen_and_ui():
 	var cam_fwd = -xr_camera.global_transform.basis.z
 	var cam_right = xr_camera.global_transform.basis.x
 	var cam_yaw = atan2(-cam_fwd.x, -cam_fwd.z)
-	var fwd_flat = Vector3(-sin(cam_yaw), 0, -cos(cam_yaw)).normalized()
-	var right_flat = Vector3(cos(cam_yaw), 0, -sin(cam_yaw)).normalized()
-	var floor_y = xr_origin.global_position.y
-	screen_mesh.global_position = cam_pos + fwd_flat * 1.8
-	screen_mesh.global_position.y = floor_y + 1.3
+	screen_mesh.global_position = cam_pos + cam_fwd * 1.8
 	screen_mesh.rotation = Vector3.ZERO
 	screen_mesh.rotation.y = cam_yaw
 	if (comp_cylinder and comp_cylinder.visible) or (comp_cylinder_left and comp_cylinder_left.visible):
 		_update_cylinder_params()
-	ui_panel_3d.global_position = cam_pos + fwd_flat * 0.9 - right_flat * 0.8
-	ui_panel_3d.global_position.y = floor_y + 1.1
-	ui_panel_3d.rotation = Vector3.ZERO
-	ui_panel_3d.rotation.y = cam_yaw
-	ui_panel_3d.rotation.x = -0.26
-	_log("[POS] Screen at %s, UI at %s, Cam at %s floor_y=%s" % [str(screen_mesh.global_position), str(ui_panel_3d.global_position), str(cam_pos), str(floor_y)])
+	_log("[POS] Screen at %s, Cam at %s" % [str(screen_mesh.global_position), str(cam_pos)])
+
+func _reset_positions():
+	if ui_visible:
+		_toggle_ui()
+	if virtual_keyboard and virtual_keyboard.visible:
+		virtual_keyboard.toggle()
+	_ui_has_saved_offset = false
+	if virtual_keyboard:
+		virtual_keyboard.reset_position()
+	_reposition_screen_and_ui()
+	state_manager.save_state()
 
 func _load_controller_models():
 	var left_scene = load("res://models/controllers/MetaQuestTouchPlus_Left.fbx")
