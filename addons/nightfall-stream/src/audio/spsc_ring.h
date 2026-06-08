@@ -67,6 +67,16 @@ public:
         read_pos_.store(0, std::memory_order_relaxed);
     }
 
+    size_t discard(size_t count) {
+        size_t r = read_pos_.load(std::memory_order_relaxed);
+        size_t w = write_pos_.load(std::memory_order_acquire);
+        size_t avail = (w >= r) ? (w - r) : (buffer_.size() - 1 - r + w);
+        size_t to_discard = (count < avail) ? count : avail;
+        size_t new_r = (r + to_discard) % buffer_.size();
+        read_pos_.store(new_r, std::memory_order_release);
+        return to_discard;
+    }
+
     size_t capacity() const { return buffer_.size() - 1; }
 
 private:

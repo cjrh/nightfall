@@ -38,7 +38,7 @@ bool MiniaudioBackend::initialize(int sample_rate, int channels, int buffer_fram
     sample_rate_ = sample_rate;
     channels_ = channels;
 
-    size_t ring_size = (size_t)(sample_rate * channels * 0.1);
+    size_t ring_size = (size_t)(sample_rate * channels * 0.2);
     size_t pow2 = 1;
     while (pow2 < ring_size) pow2 <<= 1;
     ring_ = new SpscRingBuffer<float>(pow2);
@@ -99,6 +99,13 @@ void MiniaudioBackend::shutdown() {
 
 bool MiniaudioBackend::write_pcm(const float *data, size_t frames) {
     if (!ring_ || !initialized_.load()) return false;
+
+    size_t max_buffered_samples = (size_t)(sample_rate_ * channels_ * 0.04);
+    size_t avail = ring_->read_available();
+    if (avail > max_buffered_samples) {
+        ring_->discard(avail - max_buffered_samples);
+    }
+
     size_t samples = frames * (size_t)channels_;
     size_t written = ring_->write(data, samples);
     return written == samples;
