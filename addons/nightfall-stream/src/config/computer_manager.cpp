@@ -186,6 +186,11 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
                 cached_https_ports[pair_ip] = pair_https_port;
             }
 
+            String mac = _extract_xml_value(xml, "mac");
+            if (!mac.is_empty() && mac != "00:00:00:00:00:00") {
+                pair_mac = mac;
+            }
+
             bool known_and_paired = false;
             if (!server_unique_id.is_empty()) {
                 Array hosts = config_manager->get_hosts();
@@ -196,6 +201,11 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
                         if (h.get("localaddress", "") != pair_ip) {
                             Dictionary update_data;
                             update_data["localaddress"] = pair_ip;
+                            config_manager->update_host(h["id"], update_data);
+                        }
+                        if (!pair_mac.is_empty() && h.get("mac", "") != pair_mac) {
+                            Dictionary update_data;
+                            update_data["mac"] = pair_mac;
                             config_manager->update_host(h["id"], update_data);
                         }
                         break;
@@ -279,6 +289,9 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
             host_data["srvcert"] = server_cert_pem;
             host_data["https_port"] = pair_https_port;
             host_data["server_unique_id"] = server_unique_id;
+            if (!pair_mac.is_empty()) {
+                host_data["mac"] = pair_mac;
+            }
             config_manager->add_host(host_data);
 
             pair_state = PAIR_FINISHED;

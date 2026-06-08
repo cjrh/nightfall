@@ -81,6 +81,7 @@ int AudioRenderer::init(int audio_configuration, const POPUS_MULTISTREAM_CONFIGU
     }
 
     initialized_.store(true);
+    opus_data_buf_.resize(2048);
     UtilityFunctions::print("[AudioRenderer] Initialized: ", sample_rate_, "Hz ", channels_, "ch (output ", output_channels, "ch), ", samples_per_frame_, " spf");
     return 0;
 }
@@ -114,7 +115,9 @@ void AudioRenderer::cleanup() {
 void AudioRenderer::decode_and_play_sample(const char *sample_data, int sample_length) {
     if (!initialized_.load() || !running_.load()) return;
 
-    opus_data_buf_.resize(sample_length);
+    if ((int)opus_data_buf_.size() < sample_length) {
+        opus_data_buf_.resize(sample_length);
+    }
     memcpy(opus_data_buf_.ptrw(), sample_data, sample_length);
 
     int frames = opus_decoder_->decode(opus_data_buf_, samples_per_frame_);

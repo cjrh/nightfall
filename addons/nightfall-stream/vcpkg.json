@@ -10,7 +10,6 @@
         "swresample",
         "swscale",
         "gpl",
-        "dav1d",
         "opus"
       ]
     },

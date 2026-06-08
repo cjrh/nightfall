@@ -45,6 +45,7 @@ private:
 
     String server_unique_id;
     String server_cert_pem;
+    String pair_mac;
     PackedByteArray client_secret_random;
     PackedByteArray server_challenge;
     PackedByteArray server_secret;

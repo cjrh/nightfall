@@ -3,6 +3,7 @@ extends RefCounted
 
 var main: Node3D
 var mdns_browsing: bool = false
+var wol_sender: WolSender = WolSender.new()
 
 func _init(owner: Node3D):
 	main = owner
@@ -109,6 +110,16 @@ func build_welcome_screen(parent: Node):
 	connect_btn.text = "Connect"
 	screen.add_child(connect_btn)
 
+	var wol_btn = Button.new()
+	wol_btn.name = "WelcomeWol"
+	wol_btn.custom_minimum_size = Vector2(400, 60)
+	wol_btn.add_theme_font_size_override("font_size", 24)
+	wol_btn.add_theme_color_override("font_color", Color(0.4, 0.7, 1.0, 0.8))
+	wol_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	wol_btn.text = "Wake PC"
+	wol_btn.visible = false
+	screen.add_child(wol_btn)
+
 	var spacer1 = Control.new()
 	spacer1.name = "Spacer1"
 	spacer1.custom_minimum_size = Vector2(0, 10)
@@ -169,7 +180,21 @@ func build_welcome_screen(parent: Node):
 		else:
 			connect_btn.text = "Connecting..."
 			connect_btn.disabled = true
+			main.start_connect_timeout()
 			main.stream_manager.on_pair_pressed()
+	)
+	wol_btn.pressed.connect(func():
+		var current_ip = main.get_node("%IPInput").text
+		var mac = _get_host_mac(current_ip)
+		if mac.is_empty():
+			main._log("[WOL] No MAC address found for " + current_ip)
+			wol_btn.text = "No MAC"
+			return
+		main._log("[WOL] Sending WoL to " + mac + " via " + current_ip)
+		wol_sender.send_wol_to_host(mac, current_ip)
+		wol_btn.text = "Sent!"
+		await main.get_tree().create_timer(2.0).timeout
+		wol_btn.text = "Wake PC"
 	)
 	change_btn.pressed.connect(func(): show_welcome_screen("server"))
 	app_btn.button_down.connect(func(): cycle_app())
@@ -455,6 +480,7 @@ func update_welcome_info():
 	var connect_btn = ws.get_node_or_null("WelcomeConnect")
 	var app_btn = ws.get_node_or_null("WelcomeAppBtn")
 	var change_btn = ws.get_node_or_null("WelcomeChangeServer")
+	var wol_btn = ws.get_node_or_null("WelcomeWol")
 	var spacer1 = ws.get_node_or_null("Spacer1")
 	var spacer2 = ws.get_node_or_null("Spacer2")
 
@@ -487,6 +513,8 @@ func update_welcome_info():
 		if change_btn: change_btn.visible = true
 		if spacer1: spacer1.visible = true
 		if spacer2: spacer2.visible = true
+		var has_mac = not _get_host_mac(saved_ip).is_empty()
+		if wol_btn: wol_btn.visible = has_mac
 		if main.current_host_id >= 0:
 			query_app_list()
 		elif not main._available_apps.is_empty():
@@ -500,6 +528,7 @@ func update_welcome_info():
 		if ip_label: ip_label.text = ""
 		if app_btn: app_btn.visible = false
 		if change_btn: change_btn.visible = true
+		if wol_btn: wol_btn.visible = false
 		if spacer1: spacer1.visible = false
 		if spacer2: spacer2.visible = true
 
@@ -662,3 +691,13 @@ func query_app_list():
 					app_btn.text = "App: %s" % app_name
 					app_btn.visible = true
 	)
+
+func _get_host_mac(ip: String) -> String:
+	var _cm = main.stream_backend.get_config_manager() if main.stream_backend else null
+	var hosts = _cm.get_hosts() if _cm else []
+	for h in hosts:
+		if h.has("localaddress") and h.localaddress == ip:
+			var mac = h.get("mac", "")
+			if not mac.is_empty() and mac != "00:00:00:00:00:00":
+				return mac
+	return ""

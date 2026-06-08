@@ -6,7 +6,9 @@ var _restart_pending: bool = false
 var _restart_seq: int = 0
 
 var sbs_labels: Array = ["Off", "Stretch", "Crop"]
-var ai_3d_labels: Array = ["2D", "MiDaS"]
+var ai_3d_labels: Array = ["2D", "MiDaS", "DA-V2"]
+var idle_labels: Array = ["Off", "5m", "15m", "30m", "60m"]
+var idle_values: Array = [0, 5, 15, 30, 60]
 
 func _init(owner: Node3D):
 	main = owner
@@ -33,8 +35,9 @@ func cycle_ai_3d_mode():
 		return
 	if main.sbs_mode > 0:
 		return
-	main.ai_3d_mode = (main.ai_3d_mode + 1) % 2
+	main.ai_3d_mode = (main.ai_3d_mode + 1) % 3
 	main.ui_controller.update_option_btn(main._ui_3d_btn, ai_3d_labels[main.ai_3d_mode])
+	main.ui_controller.update_3d_btn_state()
 	apply_stereo()
 	main.state_manager.save_state()
 
@@ -69,28 +72,38 @@ func toggle_passthrough():
 	if not interface:
 		return
 	main.passthrough_mode = (main.passthrough_mode + 1) % main.passthrough_labels.size()
-	var starfield = main.get_node_or_null("Starfield")
-	main._log("[PT] mode=%d starfield=%s labels=%s" % [main.passthrough_mode, str(starfield != null), str(main.passthrough_labels.size())])
+	main._log("[PT] mode=%d labels=%s" % [main.passthrough_mode, str(main.passthrough_labels.size())])
 	main._flush_log()
-	var has_alpha_blend = main.passthrough_labels.size() == 3
+	var has_alpha_blend = main.passthrough_labels.size() == 8
+	_hide_all_backgrounds()
 	if has_alpha_blend and main.passthrough_mode == 0:
 		main.get_viewport().transparent_bg = true
 		main.world_env.environment.background_mode = Environment.BG_COLOR
 		main.world_env.environment.background_color = Color(0, 0, 0, 0)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
-		if starfield: starfield.visible = false
 	elif (has_alpha_blend and main.passthrough_mode == 1) or (not has_alpha_blend and main.passthrough_mode == 0):
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 		main.world_env.environment.background_color = Color(0, 0, 0, 1)
 		main.get_viewport().transparent_bg = false
-		if starfield: starfield.visible = false
 	else:
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 		main.world_env.environment.background_color = Color(0, 0, 0, 0)
 		main.get_viewport().transparent_bg = false
-		if starfield: starfield.visible = true
+		var bg_idx = main.passthrough_mode - 2
+		if bg_idx >= 0 and bg_idx < main.bg_names.size():
+			var bg = main.get_node_or_null(main.bg_names[bg_idx])
+			if bg:
+				bg.visible = true
+				bg.emitting = true
 	main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[main.passthrough_mode])
 	main.state_manager.save_state()
+
+func _hide_all_backgrounds():
+	for name in main.bg_names:
+		var bg = main.get_node_or_null(name)
+		if bg:
+			bg.visible = false
+			bg.emitting = false
 
 func cycle_smooth_mode():
 	main.smooth_mode = (main.smooth_mode + 1) % main.smooth_labels.size()
@@ -162,6 +175,46 @@ func cycle_sharpen_mode():
 	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[main.sharpen_mode])
 	apply_filter()
 	main.state_manager.save_state()
+
+func cycle_auto_reconnect():
+	main.auto_reconnect_enabled = not main.auto_reconnect_enabled
+	if main.stream_backend and main.stream_backend._v2:
+		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
+	main.ui_controller.update_indicator_btn(main._ui_reconnect_btn, "Reconn", "On" if main.auto_reconnect_enabled else "Off")
+	main.state_manager.save_state()
+
+func cycle_idle_timeout():
+	var idx = idle_values.find(main.idle_timeout_min)
+	idx = (idx + 1) % idle_values.size()
+	main.idle_timeout_min = idle_values[idx]
+	main.ui_controller.update_indicator_btn(main._ui_idle_btn, "Idle", idle_labels[idx])
+	main.state_manager.save_state()
+
+func cycle_3d_strength():
+	main.ai_3d_strength = (main.ai_3d_strength + 1) % main.ai_3d_strength_labels.size()
+	main.ui_controller.update_option_btn(main._ui_3d_str_btn, main.ai_3d_strength_labels[main.ai_3d_strength])
+	apply_3d_params()
+	main.state_manager.save_state()
+
+func cycle_3d_convergence():
+	main.ai_3d_convergence = (main.ai_3d_convergence + 1) % main.ai_3d_convergence_labels.size()
+	main.ui_controller.update_option_btn(main._ui_3d_conv_btn, main.ai_3d_convergence_labels[main.ai_3d_convergence])
+	apply_3d_params()
+	main.state_manager.save_state()
+
+func apply_3d_params():
+	var vals = main.ai_3d_strength_values[main.ai_3d_strength]
+	var conv = main.ai_3d_convergence_values[main.ai_3d_convergence]
+	var mats = [main.comp_shader_mat, main.comp_shader_mat_left, main.comp_shader_mat_right]
+	if main.screen_mesh.material_override is ShaderMaterial:
+		mats.append(main.screen_mesh.material_override)
+	for mat in mats:
+		if not mat:
+			continue
+		mat.set_shader_parameter("parallax", vals["parallax"])
+		mat.set_shader_parameter("foreground_scale", vals["fg"])
+		mat.set_shader_parameter("zone_radius", vals["zone"])
+		mat.set_shader_parameter("convergence", conv)
 
 func apply_filter():
 	if not main.is_xr_active:

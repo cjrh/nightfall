@@ -34,10 +34,10 @@ var thumbstick_exit_flag: bool = false
 
 var _KEY_ROWS = [
 	[{"k": KEY_ESCAPE, "l": "Esc", "w": 1.5}, {"k": KEY_F1, "l": "F1"}, {"k": KEY_F2, "l": "F2"}, {"k": KEY_F3, "l": "F3"}, {"k": KEY_F4, "l": "F4"}, {"k": KEY_F5, "l": "F5"}, {"k": KEY_F6, "l": "F6"}, {"k": KEY_F7, "l": "F7"}, {"k": KEY_F8, "l": "F8"}, {"k": KEY_F9, "l": "F9"}, {"k": KEY_F10, "l": "F10"}, {"k": KEY_F11, "l": "F11"}, {"k": KEY_F12, "l": "F12"}, {"k": KEY_DELETE, "l": "Del", "w": 1.5}],
-	[{"k": KEY_QUOTELEFT, "l": "`"}, {"k": KEY_1, "l": "1"}, {"k": KEY_2, "l": "2"}, {"k": KEY_3, "l": "3"}, {"k": KEY_4, "l": "4"}, {"k": KEY_5, "l": "5"}, {"k": KEY_6, "l": "6"}, {"k": KEY_7, "l": "7"}, {"k": KEY_8, "l": "8"}, {"k": KEY_9, "l": "9"}, {"k": KEY_0, "l": "0"}, {"k": KEY_MINUS, "l": "-"}, {"k": KEY_EQUAL, "l": "="}, {"k": KEY_BACKSPACE, "l": "Bksp", "w": 2.0}],
-	[{"k": KEY_TAB, "l": "Tab", "w": 1.5}, {"k": KEY_Q, "l": "Q"}, {"k": KEY_W, "l": "W"}, {"k": KEY_E, "l": "E"}, {"k": KEY_R, "l": "R"}, {"k": KEY_T, "l": "T"}, {"k": KEY_Y, "l": "Y"}, {"k": KEY_U, "l": "U"}, {"k": KEY_I, "l": "I"}, {"k": KEY_O, "l": "O"}, {"k": KEY_P, "l": "P"}, {"k": KEY_BRACKETLEFT, "l": "["}, {"k": KEY_BRACKETRIGHT, "l": "]"}, {"k": KEY_BACKSLASH, "l": "\\", "w": 1.5}],
-	[{"k": KEY_CAPSLOCK, "l": "Caps", "w": 1.75}, {"k": KEY_A, "l": "A"}, {"k": KEY_S, "l": "S"}, {"k": KEY_D, "l": "D"}, {"k": KEY_F, "l": "F"}, {"k": KEY_G, "l": "G"}, {"k": KEY_H, "l": "H"}, {"k": KEY_J, "l": "J"}, {"k": KEY_K, "l": "K"}, {"k": KEY_L, "l": "L"}, {"k": KEY_SEMICOLON, "l": ";"}, {"k": KEY_APOSTROPHE, "l": "'"}, {"k": KEY_ENTER, "l": "Enter", "w": 2.25}],
-	[{"k": KEY_SHIFT, "l": "Shift", "w": 2.25, "mod": "shift"}, {"k": KEY_Z, "l": "Z"}, {"k": KEY_X, "l": "X"}, {"k": KEY_C, "l": "C"}, {"k": KEY_V, "l": "V"}, {"k": KEY_B, "l": "B"}, {"k": KEY_N, "l": "N"}, {"k": KEY_M, "l": "M"}, {"k": KEY_COMMA, "l": ","}, {"k": KEY_PERIOD, "l": "."}, {"k": KEY_SLASH, "l": "/"}, {"k": KEY_SHIFT, "l": "Shift", "w": 2.75, "mod": "shift"}],
+	[{"k": KEY_QUOTELEFT, "l": "`", "s": "~"}, {"k": KEY_1, "l": "1", "s": "!"}, {"k": KEY_2, "l": "2", "s": "@"}, {"k": KEY_3, "l": "3", "s": "#"}, {"k": KEY_4, "l": "4", "s": "$"}, {"k": KEY_5, "l": "5", "s": "%"}, {"k": KEY_6, "l": "6", "s": "^"}, {"k": KEY_7, "l": "7", "s": "&"}, {"k": KEY_8, "l": "8", "s": "*"}, {"k": KEY_9, "l": "9", "s": "("}, {"k": KEY_0, "l": "0", "s": ")"}, {"k": KEY_MINUS, "l": "-", "s": "_"}, {"k": KEY_EQUAL, "l": "=", "s": "+"}, {"k": KEY_BACKSPACE, "l": "Bksp", "w": 2.0}],
+	[{"k": KEY_TAB, "l": "Tab", "w": 1.5}, {"k": KEY_Q, "l": "Q"}, {"k": KEY_W, "l": "W"}, {"k": KEY_E, "l": "E"}, {"k": KEY_R, "l": "R"}, {"k": KEY_T, "l": "T"}, {"k": KEY_Y, "l": "Y"}, {"k": KEY_U, "l": "U"}, {"k": KEY_I, "l": "I"}, {"k": KEY_O, "l": "O"}, {"k": KEY_P, "l": "P"}, {"k": KEY_BRACKETLEFT, "l": "[", "s": "{"}, {"k": KEY_BRACKETRIGHT, "l": "]", "s": "}"}, {"k": KEY_BACKSLASH, "l": "\\", "s": "|", "w": 1.5}],
+	[{"k": KEY_CAPSLOCK, "l": "Caps", "w": 1.75}, {"k": KEY_A, "l": "A"}, {"k": KEY_S, "l": "S"}, {"k": KEY_D, "l": "D"}, {"k": KEY_F, "l": "F"}, {"k": KEY_G, "l": "G"}, {"k": KEY_H, "l": "H"}, {"k": KEY_J, "l": "J"}, {"k": KEY_K, "l": "K"}, {"k": KEY_L, "l": "L"}, {"k": KEY_SEMICOLON, "l": ";", "s": ":"}, {"k": KEY_APOSTROPHE, "l": "'", "s": "\""}, {"k": KEY_ENTER, "l": "Enter", "w": 2.25}],
+	[{"k": KEY_SHIFT, "l": "Shift", "w": 2.25, "mod": "shift"}, {"k": KEY_Z, "l": "Z"}, {"k": KEY_X, "l": "X"}, {"k": KEY_C, "l": "C"}, {"k": KEY_V, "l": "V"}, {"k": KEY_B, "l": "B"}, {"k": KEY_N, "l": "N"}, {"k": KEY_M, "l": "M"}, {"k": KEY_COMMA, "l": ",", "s": "<"}, {"k": KEY_PERIOD, "l": ".", "s": ">"}, {"k": KEY_SLASH, "l": "/", "s": "?"}, {"k": KEY_SHIFT, "l": "Shift", "w": 2.75, "mod": "shift"}],
 	[{"k": KEY_CTRL, "l": "Ctrl", "w": 1.5, "mod": "ctrl"}, {"k": KEY_ALT, "l": "Alt", "w": 1.5, "mod": "alt"}, {"k": KEY_META, "l": "Super", "w": 1.5}, {"k": KEY_SPACE, "l": "Space", "w": 6.0}, {"k": KEY_META, "l": "Super", "w": 1.5}, {"k": KEY_ALT, "l": "Alt", "w": 1.5, "mod": "alt"}, {"k": KEY_CTRL, "l": "Ctrl", "w": 1.5, "mod": "ctrl"}],
 ]
 
@@ -166,7 +166,7 @@ func _build_keys():
 			var pressed = _make_key_style(Color(0.45, 0.5, 0.65, 1.0), Color(0.6, 0.65, 0.8, 1.0))
 			btn.add_theme_stylebox_override("pressed", pressed)
 			_kb_root.add_child(btn)
-			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", "")})
+			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", "")})
 			x += btn_w + gap
 	_apply_modifier_visuals()
 
@@ -481,6 +481,13 @@ func _apply_modifier_visuals():
 		var bg = Color(0.35, 0.45, 0.6, 1.0) if is_on else Color(0.2, 0.2, 0.22, 0.9)
 		var border = Color(0.5, 0.6, 0.75, 1.0) if is_on else Color(0.35, 0.35, 0.38, 1.0)
 		btn.add_theme_stylebox_override("normal", _make_key_style(bg, border))
+	var shifted = _shift_on or _caps_on
+	for kd in _key_data:
+		var shift_label = kd.get("s", "")
+		if shift_label == "":
+			continue
+		var btn = kd["btn"]
+		btn.text = shift_label if shifted else kd["l"]
 
 var _saved_offset: Vector3 = Vector3.ZERO
 var _saved_rot_y: float = 0.0

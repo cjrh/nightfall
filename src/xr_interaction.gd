@@ -499,6 +499,8 @@ func _compute_parallax_shift(uv_x: float) -> float:
 	shift *= vignette
 	return shift
 
+var _scroll_cooldown: float = 0.0
+
 func handle_scroll():
 	if not main.is_xr_active or not main.is_streaming:
 		return
@@ -506,6 +508,9 @@ func handle_scroll():
 		if main.controller_mapper.ctrl_type != ControllerMapper.CtrlType.KBMOUSE:
 			return
 	if main.virtual_keyboard and main.virtual_keyboard.trackpad_active:
+		return
+	var now = Time.get_ticks_msec() / 1000.0
+	if _scroll_cooldown > now:
 		return
 	var right_stick_y = 0.0
 	if main.right_hand:
@@ -516,10 +521,9 @@ func handle_scroll():
 			if absf(val) > 0.1:
 				right_stick_y = val
 				break
-	if absf(right_stick_y) > 0.4:
-		var clicks = int(right_stick_y * 0.8)
-		if clicks != 0:
-			main.stream_backend.send_scroll_event(clicks)
+	if absf(right_stick_y) > 0.5:
+		main.stream_backend.send_scroll_event(1 if right_stick_y > 0 else -1)
+		_scroll_cooldown = now + 0.15
 
 func _is_ui_grab_bar(pixel_pos: Vector2) -> bool:
 	var bar = main.ui_viewport.find_child("CompGrabBar", true, false)

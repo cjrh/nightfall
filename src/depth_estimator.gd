@@ -7,8 +7,8 @@ var depth_target: TextureRect
 var depth_texture: ImageTexture
 var enabled: bool = false
 var submit_timer: float = 0.0
-var submit_interval: float = 0.1
-var model_size: int = 256
+var submit_interval: float = 0.2
+var model_size: int = 512
 var _poll_timer: float = 0.0
 
 var _platform: String

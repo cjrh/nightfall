@@ -2,6 +2,10 @@ class_name ControllerMapper
 extends Node
 
 enum CtrlType { GAMEPAD, KEYBOARD, KBMOUSE }
+enum BtnToggle { HEAD, TILT, NONE }
+
+var btn_toggle: int = BtnToggle.HEAD
+var btn_toggle_labels: Array = ["Head", "Tilt", "None"]
 
 var main: Node3D
 var active: bool = false
@@ -18,7 +22,7 @@ var _prev_rx: int = 0
 var _prev_ry: int = 0
 var _was_both_sticks: bool = false
 var _close_to_head: bool = false
-var _close_dist: float = 0.15
+var _close_dist: float = 0.25
 var _poll_timer: float = 0.0
 
 var _KBD_DEFAULT = {
@@ -191,7 +195,21 @@ func _send_controller_mode():
 	var head_pos = main.xr_camera.global_position
 	var left_pos = main.left_hand.global_position if main.left_hand else Vector3.ZERO
 	var right_pos = main.right_hand.global_position if main.right_hand else Vector3.ZERO
-	_close_to_head = (left_pos.distance_to(head_pos) < _close_dist) or (right_pos.distance_to(head_pos) < _close_dist)
+
+	var left_alt = false
+	var right_alt = false
+	if btn_toggle == BtnToggle.HEAD:
+		_close_to_head = left_pos.distance_to(head_pos) < _close_dist or right_pos.distance_to(head_pos) < _close_dist
+		left_alt = left_pos.distance_to(head_pos) < _close_dist
+		right_alt = right_pos.distance_to(head_pos) < _close_dist
+	elif btn_toggle == BtnToggle.TILT:
+		if main.left_hand:
+			var left_roll = atan2(-main.left_hand.global_basis.x.y, main.left_hand.global_basis.x.x)
+			left_alt = left_roll > 0.5
+		if main.right_hand:
+			var right_roll = atan2(-main.right_hand.global_basis.x.y, main.right_hand.global_basis.x.x)
+			right_alt = right_roll < -0.5
+		_close_to_head = left_alt or right_alt
 
 	var button_flags: int = 0
 
@@ -212,16 +230,19 @@ func _send_controller_mode():
 	var l_click = main.left_hand.is_button_pressed("primary_click") if main.left_hand else false
 	var r_click = main.right_hand.is_button_pressed("primary_click") if main.right_hand else false
 
-	if _close_to_head:
-		if left_a: button_flags |= 0x0004
+	if left_alt:
+		if left_a: button_flags |= 0x0002
 		if left_b: button_flags |= 0x0001
-		if right_a: button_flags |= 0x0008
-		if right_b: button_flags |= 0x0002
+	else:
+		if left_a: button_flags |= 0x0004
+		if left_b: button_flags |= 0x0008
+
+	if right_alt:
+		if right_a: button_flags |= 0x4000
+		if right_b: button_flags |= 0x8000
 	else:
 		if right_a: button_flags |= 0x1000
 		if right_b: button_flags |= 0x2000
-		if left_a: button_flags |= 0x4000
-		if left_b: button_flags |= 0x8000
 
 	if lg_val > 0.5: button_flags |= 0x0100
 	if rg_val > 0.5: button_flags |= 0x0200
@@ -347,3 +368,10 @@ func get_mode_label() -> String:
 
 func get_close_to_head() -> bool:
 	return _close_to_head
+
+func cycle_btn_toggle():
+	btn_toggle = (btn_toggle + 1) % 3
+	main.state_manager.save_state()
+	if main.ui_controller:
+		main.ui_controller.update_btn_toggle_btn()
+	_log("[CTRL] Button toggle: " + btn_toggle_labels[btn_toggle])

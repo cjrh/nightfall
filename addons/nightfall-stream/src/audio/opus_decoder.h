@@ -4,6 +4,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <cstring>
 #include <cstdint>
 
 extern "C" {
@@ -23,7 +24,14 @@ public:
     void cleanup();
 
     int decode(const PackedByteArray &opus_data, int max_samples_per_frame);
-    PackedFloat32Array get_last_pcm() const { return last_pcm_; }
+    PackedFloat32Array get_last_pcm() const {
+        int valid = last_decoded_frames_ * channels_;
+        if (valid <= 0 || valid > (int)last_pcm_.size()) return last_pcm_;
+        PackedFloat32Array result;
+        result.resize(valid);
+        memcpy(result.ptrw(), last_pcm_.ptr(), valid * sizeof(float));
+        return result;
+    }
 
     int get_sample_rate() const { return sample_rate_; }
     int get_channels() const { return channels_; }
@@ -37,6 +45,7 @@ protected:
 private:
     OpusMSDecoder *decoder_ = nullptr;
     PackedFloat32Array last_pcm_;
+    int last_decoded_frames_ = 0;
     int sample_rate_ = 48000;
     int channels_ = 0;
     int samples_per_frame_ = 0;

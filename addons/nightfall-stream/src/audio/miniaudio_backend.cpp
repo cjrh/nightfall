@@ -38,7 +38,7 @@ bool MiniaudioBackend::initialize(int sample_rate, int channels, int buffer_fram
     sample_rate_ = sample_rate;
     channels_ = channels;
 
-    size_t ring_size = (size_t)(sample_rate * channels * 0.2);
+    size_t ring_size = (size_t)(sample_rate * channels * 0.1);
     size_t pow2 = 1;
     while (pow2 < ring_size) pow2 <<= 1;
     ring_ = new SpscRingBuffer<float>(pow2);
