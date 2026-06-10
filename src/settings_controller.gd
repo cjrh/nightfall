@@ -6,7 +6,7 @@ var _restart_pending: bool = false
 var _restart_seq: int = 0
 
 var sbs_labels: Array = ["Off", "Stretch", "Crop"]
-var ai_3d_labels: Array = ["2D", "MiDaS", "DA-V2"]
+var ai_3d_labels: Array = ["2D", "MiDaS"]
 var idle_labels: Array = ["Off", "5m", "15m", "30m", "60m"]
 var idle_values: Array = [0, 5, 15, 30, 60]
 
@@ -35,9 +35,8 @@ func cycle_ai_3d_mode():
 		return
 	if main.sbs_mode > 0:
 		return
-	main.ai_3d_mode = (main.ai_3d_mode + 1) % 3
+	main.ai_3d_mode = (main.ai_3d_mode + 1) % 2
 	main.ui_controller.update_option_btn(main._ui_3d_btn, ai_3d_labels[main.ai_3d_mode])
-	main.ui_controller.update_3d_btn_state()
 	apply_stereo()
 	main.state_manager.save_state()
 
@@ -189,32 +188,6 @@ func cycle_idle_timeout():
 	main.idle_timeout_min = idle_values[idx]
 	main.ui_controller.update_indicator_btn(main._ui_idle_btn, "Idle", idle_labels[idx])
 	main.state_manager.save_state()
-
-func cycle_3d_strength():
-	main.ai_3d_strength = (main.ai_3d_strength + 1) % main.ai_3d_strength_labels.size()
-	main.ui_controller.update_option_btn(main._ui_3d_str_btn, main.ai_3d_strength_labels[main.ai_3d_strength])
-	apply_3d_params()
-	main.state_manager.save_state()
-
-func cycle_3d_convergence():
-	main.ai_3d_convergence = (main.ai_3d_convergence + 1) % main.ai_3d_convergence_labels.size()
-	main.ui_controller.update_option_btn(main._ui_3d_conv_btn, main.ai_3d_convergence_labels[main.ai_3d_convergence])
-	apply_3d_params()
-	main.state_manager.save_state()
-
-func apply_3d_params():
-	var vals = main.ai_3d_strength_values[main.ai_3d_strength]
-	var conv = main.ai_3d_convergence_values[main.ai_3d_convergence]
-	var mats = [main.comp_shader_mat, main.comp_shader_mat_left, main.comp_shader_mat_right]
-	if main.screen_mesh.material_override is ShaderMaterial:
-		mats.append(main.screen_mesh.material_override)
-	for mat in mats:
-		if not mat:
-			continue
-		mat.set_shader_parameter("parallax", vals["parallax"])
-		mat.set_shader_parameter("foreground_scale", vals["fg"])
-		mat.set_shader_parameter("zone_radius", vals["zone"])
-		mat.set_shader_parameter("convergence", conv)
 
 func apply_filter():
 	if not main.is_xr_active:

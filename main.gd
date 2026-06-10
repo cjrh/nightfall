@@ -81,14 +81,8 @@ var curvature_labels: Array = ["Flat", "Slight Curve", "Curved"]
 var smooth_mode: int = 0
 var sharpen_mode: int = 0
 var smooth_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
-var sharpen_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
-var ai_3d_strength: int = 1
-var ai_3d_strength_labels: Array = ["Low", "Med", "High", "Max"]
-var ai_3d_strength_values: Array = [{"parallax": 0.14, "fg": 0.7, "zone": 0.10}, {"parallax": 0.22, "fg": 0.85, "zone": 0.06}, {"parallax": 0.30, "fg": 1.0, "zone": 0.03}, {"parallax": 0.40, "fg": 1.2, "zone": 0.01}]
-var ai_3d_convergence: int = 1
-var ai_3d_convergence_labels: Array = ["Near", "Mid", "Far"]
-var ai_3d_convergence_values: Array = [0.6, 0.75, 0.9]
-var _xr_base_render_scale: float = 1.0
+ var sharpen_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
+ var _xr_base_render_scale: float = 1.0
 var _xr_render_width: int = 1680
 var _mesh_size: Vector2 = Vector2(3.2, 1.8)
 var stream_fps: int = 60
@@ -198,8 +192,6 @@ var idle_timeout_min: int = 0
 var _last_activity_time: float = 0.0
 var _ui_idle_btn: Button
 var _ui_reconnect_btn: Button
-var _ui_3d_str_btn: Button
-var _ui_3d_conv_btn: Button
 var _ui_exit_btn: Button
 var _ui_disconnect_btn: Button
 var _ui_close_btn: Button
@@ -797,7 +789,7 @@ func _update_cursor_layer():
 			var bezel_px = 8 if bezel_enabled else 0
 			var base_w = _comp_base_size.x
 			var base_h = _comp_base_size.y
-			var cursor_px = 48
+			var cursor_px = 34
 			var cx = bezel_px + uv.x * base_w
 			var cy = bezel_px + uv.y * base_h
 			comp_cursor.visible = false
@@ -1040,6 +1032,7 @@ func _switch_to_stereo_comp_layer():
 	comp_shader_mat_right.set_shader_parameter("eye_index", 2)
 	comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	settings_controller.apply_3d_params()
 	_make_screen_transparent()
 	bezel_mesh.visible = false
 	_update_cylinder_params()
@@ -1199,7 +1192,7 @@ func _ready():
 	if OS.get_name() == "Android":
 		depth_estimator.setup()
 	sbs_mode = clampi(sbs_mode, 0, 2)
-	ai_3d_mode = clampi(ai_3d_mode, 0, 2)
+	ai_3d_mode = clampi(ai_3d_mode, 0, 1)
 
 	virtual_keyboard = VirtualKeyboard.new(self)
 	add_child(virtual_keyboard)

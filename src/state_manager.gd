@@ -23,8 +23,6 @@ func save_state():
 	save.set_value("controller", "btn_toggle", main.controller_mapper.btn_toggle)
 	save.set_value("stream", "auto_reconnect", main.auto_reconnect_enabled)
 	save.set_value("stream", "idle_timeout_min", main.idle_timeout_min)
-	save.set_value("stream", "ai_3d_strength", main.ai_3d_strength)
-	save.set_value("stream", "ai_3d_convergence", main.ai_3d_convergence)
 	save.save("user://app_state.cfg")
 	save_host_state()
 
@@ -56,7 +54,7 @@ func load_host_state(ip: String):
 	main.double_h = save.get_value(ip, "double_h", false)
 	if save.has_section_key(ip, "sbs_mode"):
 		main.sbs_mode = clampi(save.get_value(ip, "sbs_mode", 0), 0, 2)
-		main.ai_3d_mode = clampi(save.get_value(ip, "ai_3d_mode", 0), 0, 2)
+		main.ai_3d_mode = clampi(save.get_value(ip, "ai_3d_mode", 0), 0, 1)
 	elif save.has_section_key(ip, "stereo_mode"):
 		var old = clampi(save.get_value(ip, "stereo_mode", 0), 0, 4)
 		if old <= 2:
@@ -146,14 +144,9 @@ func load_state():
 	main.settings_controller.apply_filter()
 	main.auto_reconnect_enabled = save.get_value("stream", "auto_reconnect", true)
 	main.idle_timeout_min = save.get_value("stream", "idle_timeout_min", 0)
-	main.ai_3d_strength = clampi(save.get_value("stream", "ai_3d_strength", 1), 0, main.ai_3d_strength_labels.size() - 1)
-	main.ai_3d_convergence = clampi(save.get_value("stream", "ai_3d_convergence", 1), 0, main.ai_3d_convergence_labels.size() - 1)
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
 	main.ui_controller.update_indicator_btn(main._ui_reconnect_btn, "Reconn", "On" if main.auto_reconnect_enabled else "Off")
 	var idle_idx = main.settings_controller.idle_values.find(main.idle_timeout_min)
 	if idle_idx < 0: idle_idx = 0
 	main.ui_controller.update_indicator_btn(main._ui_idle_btn, "Idle", main.settings_controller.idle_labels[idle_idx])
-	main.ui_controller.update_option_btn(main._ui_3d_str_btn, main.ai_3d_strength_labels[main.ai_3d_strength])
-	main.ui_controller.update_option_btn(main._ui_3d_conv_btn, main.ai_3d_convergence_labels[main.ai_3d_convergence])
-	main.settings_controller.apply_3d_params()

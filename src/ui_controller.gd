@@ -53,11 +53,6 @@ func update_3d_btn_state():
 		var disabled = main.sbs_mode > 0
 		main._ui_3d_btn.disabled = disabled
 		main._ui_3d_btn.modulate.a = 0.3 if disabled else 1.0
-	var show_3d = main.ai_3d_mode > 0 and main.sbs_mode == 0
-	if main._ui_3d_str_btn:
-		main._ui_3d_str_btn.visible = show_3d
-	if main._ui_3d_conv_btn:
-		main._ui_3d_conv_btn.visible = show_3d
 
 func update_ui():
 	main.get_node("%Crosshair").visible = (not main.is_xr_active and not main.mouse_captured_by_stream)
@@ -364,12 +359,6 @@ func build_ui():
 
 	main._ui_render_btn = make_option_btn("Smooth", "0%")
 	disp_row3.add_child(main._ui_render_btn)
-	main._ui_3d_str_btn = make_option_btn("3D", "Med")
-	disp_row3.add_child(main._ui_3d_str_btn)
-	main._ui_3d_conv_btn = make_option_btn("Depth", "Mid")
-	disp_row3.add_child(main._ui_3d_conv_btn)
-	main._ui_3d_str_btn.visible = false
-	main._ui_3d_conv_btn.visible = false
 
 	_tab_stream = VBoxContainer.new()
 	_tab_stream.name = "TabStream"
@@ -518,8 +507,6 @@ func build_ui():
 	main._ui_btn_toggle_btn.button_down.connect(func(): main.controller_mapper.cycle_btn_toggle())
 	main._ui_reconnect_btn.button_down.connect(func(): main.settings_controller.cycle_auto_reconnect())
 	main._ui_idle_btn.button_down.connect(func(): main.settings_controller.cycle_idle_timeout())
-	main._ui_3d_str_btn.button_down.connect(func(): main.settings_controller.cycle_3d_strength())
-	main._ui_3d_conv_btn.button_down.connect(func(): main.settings_controller.cycle_3d_convergence())
 	_tab_btn_display.button_down.connect(func(): switch_tab(0))
 	_tab_btn_stream.button_down.connect(func(): switch_tab(1))
 	switch_tab(0)
