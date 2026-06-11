@@ -38,9 +38,6 @@ int OpusDecoderWrapper::init(int sample_rate, int channels, int streams, int cou
     channels_ = channels;
     samples_per_frame_ = sample_rate / 200;
 
-    int max_samples = 5760;
-    last_pcm_.resize(max_samples * channels);
-
     UtilityFunctions::print("[OpusDecoder] Initialized: ", sample_rate, "Hz, ", channels, "ch, ", streams, " streams, ", coupled_streams, " coupled");
     return 0;
 }
@@ -59,9 +56,8 @@ int OpusDecoderWrapper::decode(const PackedByteArray &opus_data, int max_samples
     if (max_samples < 5760) max_samples = 5760;
 
     int buf_size = max_samples * channels_;
-    if (last_pcm_.size() < buf_size) {
-        last_pcm_.resize(buf_size);
-    }
+
+    last_pcm_.resize(buf_size);
 
     int frames = opus_multistream_decode_float(
         decoder_,
@@ -73,10 +69,13 @@ int OpusDecoderWrapper::decode(const PackedByteArray &opus_data, int max_samples
     );
 
     if (frames < 0) {
+        NF_LOGE("OpusDecoder", "decode FAILED: ret=%d data_size=%d max_samples=%d (%s)",
+            frames, opus_data.size(), max_samples, opus_strerror(frames));
+        last_pcm_.resize(0);
         return frames;
     }
 
-    last_decoded_frames_ = frames;
+    last_pcm_.resize(frames * channels_);
     return frames;
 }
 

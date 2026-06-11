@@ -70,9 +70,9 @@ var stats_fps: float = 0.0
 var stats_frame_times: Array = []
 var stats_network_events: int = 0
 var passthrough_mode: int = 0
-var passthrough_labels: Array = ["On", "Off", "Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
-var bg_names: Array = ["Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
-var bg_offsets: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0, 10, -20), Vector3(0, 10, 0), Vector3(0, -3, 0)]
+var passthrough_labels: Array = ["On", "Off", "Starfield", "Ash", "Snow", "Data"]
+var bg_names: Array = ["Starfield", "Ash", "Snow", "Data"]
+var bg_offsets: Array = [Vector3.ZERO, Vector3.ZERO, Vector3(0, 10, 0), Vector3(0, -3, 0)]
 var ui_visible: bool = false
 var bezel_enabled: bool = true
 var bezel_mesh: MeshInstance3D
@@ -774,13 +774,13 @@ func _update_cursor_layer():
 	var pad_on_screen = controller_mapper and controller_mapper.is_active() and controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
 	var tp_capturing = virtual_keyboard and virtual_keyboard.visible and virtual_keyboard.trackpad_active
 	var stereo = settings_controller.get_stereo_mode() if settings_controller else 0
-	var use_in_stream = on_screen and not pad_on_screen and not tp_capturing
+	var use_in_stream = is_streaming and on_screen and not pad_on_screen and not tp_capturing
 	if active_raycast.is_colliding():
 		var hit_point = _get_steady_hit(active_raycast.get_collision_point())
 		var col = active_raycast.get_collider()
 		var par = col.get_parent() if col else null
 		on_screen = (par == screen_mesh)
-		use_in_stream = on_screen and not pad_on_screen and not tp_capturing
+		use_in_stream = is_streaming and on_screen and not pad_on_screen and not tp_capturing
 		if on_screen and (pad_on_screen or tp_capturing):
 			comp_cursor.visible = false
 			_hide_all_stream_cursors()
@@ -986,6 +986,7 @@ func _switch_to_comp_layer():
 		_log("[COMP] Not available, using mesh rendering")
 		return
 	var stereo = settings_controller.get_stereo_mode() if settings_controller else 0
+	_log("[SBS-DEBUG] _switch_to_comp_layer: stereo=%d" % stereo)
 	if stereo > 0:
 		_switch_to_stereo_comp_layer()
 		return
@@ -1013,6 +1014,7 @@ func _switch_to_comp_layer():
 	_update_comp_bezel()
 
 func _switch_to_stereo_comp_layer():
+	_log("[SBS-DEBUG] _switch_to_stereo_comp_layer called, comp_layer_available=%s" % str(comp_layer_available))
 	if not comp_layer_available:
 		use_comp_layer = false
 		_log("[COMP] Not available, cannot use stereo comp layer")
@@ -1022,6 +1024,8 @@ func _switch_to_stereo_comp_layer():
 	if comp_cylinder: comp_cylinder.visible = false
 	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var stereo = settings_controller.get_stereo_mode()
+	_log("[SBS-DEBUG] stereo=%d comp_cylinder_left=%s comp_cylinder_right=%s comp_viewport_left=%s comp_viewport_right=%s" % [stereo, str(comp_cylinder_left), str(comp_cylinder_right), str(comp_viewport_left), str(comp_viewport_right)])
+	_log("[SBS-DEBUG] comp_shader_mat_left=%s comp_shader_mat_right=%s" % [str(comp_shader_mat_left), str(comp_shader_mat_right)])
 	comp_cylinder_left.visible = true
 	comp_cylinder_right.visible = true
 	comp_cylinder_left.set_layer_viewport(comp_viewport_left)
@@ -1297,13 +1301,13 @@ func _ready():
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 0)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
-		passthrough_labels = ["On", "Off", "Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
+		passthrough_labels = ["On", "Off", "Starfield", "Ash", "Snow", "Data"]
 	else:
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 1)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 		passthrough_mode = 1
-		passthrough_labels = ["Off", "Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
+		passthrough_labels = ["Off", "Starfield", "Ash", "Snow", "Data"]
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
@@ -1706,9 +1710,7 @@ func _hide_all_backgrounds():
 
 func _create_backgrounds():
 	_create_starfield()
-	_create_warp()
-	_create_firefly()
-	_create_aurora()
+	_create_ash()
 	_create_snow()
 	_create_data()
 	var active_bg = passthrough_mode - 2
@@ -1751,9 +1753,9 @@ func _create_starfield():
 	particles.position = xr_camera.global_position
 	add_child(particles)
 
-func _create_warp():
+func _create_ash():
 	var particles = GPUParticles3D.new()
-	particles.name = "Warp"
+	particles.name = "Ash"
 	particles.emitting = true
 	particles.amount = 200
 	particles.lifetime = 4.0
@@ -1785,69 +1787,6 @@ func _create_warp():
 	particles.position = xr_camera.global_position
 	add_child(particles)
 
-func _create_firefly():
-	var particles = GPUParticles3D.new()
-	particles.name = "Firefly"
-	particles.emitting = true
-	particles.amount = 50
-	particles.lifetime = 30.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 10
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(15, 10, 15)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	mat.direction = Vector3(0, 0, 0)
-	mat.spread = 0.0
-	particles.process_material = mat
-	var dot = SphereMesh.new()
-	dot.radius = 0.08
-	dot.height = 0.16
-	var sh = load("res://src/shaders/firefly.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	dot.material = sm
-	particles.draw_pass_1 = dot
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position
-	add_child(particles)
-
-func _create_aurora():
-	var particles = GPUParticles3D.new()
-	particles.name = "Aurora"
-	particles.emitting = true
-	particles.amount = 20
-	particles.lifetime = 30.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 10
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(40, 3, 15)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	mat.direction = Vector3(0, 0, 0)
-	mat.spread = 0.0
-	particles.process_material = mat
-	var quad = QuadMesh.new()
-	quad.size = Vector2(14.0, 3.0)
-	var sh = load("res://src/shaders/aurora.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	quad.material = sm
-	particles.draw_pass_1 = quad
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position + Vector3(0, 10, -20)
-	add_child(particles)
-
 func _create_snow():
 	var particles = GPUParticles3D.new()
 	particles.name = "Snow"
@@ -1870,7 +1809,7 @@ func _create_snow():
 	mat.initial_velocity_max = 1.0
 	particles.process_material = mat
 	var flake = QuadMesh.new()
-	flake.size = Vector2(0.25, 0.25)
+	flake.size = Vector2(0.075, 0.075)
 	var sh = load("res://src/shaders/snow.gdshader")
 	var sm = ShaderMaterial.new()
 	sm.shader = sh
@@ -1885,7 +1824,7 @@ func _create_data():
 	var particles = GPUParticles3D.new()
 	particles.name = "Data"
 	particles.emitting = true
-	particles.amount = 100
+	particles.amount = 250
 	particles.lifetime = 6.0
 	particles.explosiveness = 0.0
 	particles.randomness = 1.0
@@ -1894,7 +1833,7 @@ func _create_data():
 	particles.visible = false
 	var mat = ParticleProcessMaterial.new()
 	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(20, 2, 20)
+	mat.emission_box_extents = Vector3(50, 2, 50)
 	mat.particle_flag_disable_z = false
 	mat.gravity = Vector3(0, 3.0, 0)
 	mat.direction = Vector3(0, 1, 0)

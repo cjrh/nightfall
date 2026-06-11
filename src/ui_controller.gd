@@ -4,8 +4,10 @@ extends RefCounted
 var main: Node3D
 var _tab_display: Control
 var _tab_stream: Control
+var _tab_control: Control
 var _tab_btn_display: Button
 var _tab_btn_stream: Button
+var _tab_btn_control: Button
 var _current_tab: int = 0
 
 func _init(owner: Node3D):
@@ -62,6 +64,7 @@ func switch_tab(tab: int):
 	_current_tab = tab
 	_tab_display.visible = (tab == 0)
 	_tab_stream.visible = (tab == 1)
+	if _tab_control: _tab_control.visible = (tab == 2)
 	var tab_active_style = StyleBoxFlat.new()
 	tab_active_style.bg_color = Color(1, 1, 1, 0.12)
 	tab_active_style.set_corner_radius_all(8)
@@ -74,6 +77,10 @@ func switch_tab(tab: int):
 	_tab_btn_display.add_theme_stylebox_override("hover", tab_active_style)
 	_tab_btn_stream.add_theme_stylebox_override("normal", tab_active_style if tab == 1 else tab_inactive_style)
 	_tab_btn_stream.add_theme_stylebox_override("hover", tab_active_style)
+	if _tab_btn_control:
+		_tab_btn_control.add_theme_stylebox_override("normal", tab_active_style if tab == 2 else tab_inactive_style)
+		_tab_btn_control.add_theme_stylebox_override("hover", tab_active_style)
+		_tab_btn_control.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 2 else Color(1, 1, 1, 0.5))
 	_tab_btn_display.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 0 else Color(1, 1, 1, 0.5))
 	_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 1 else Color(1, 1, 1, 0.5))
 
@@ -295,6 +302,14 @@ func build_ui():
 	_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	tab_bar.add_child(_tab_btn_stream)
 
+	_tab_btn_control = Button.new()
+	_tab_btn_control.text = "Control"
+	_tab_btn_control.focus_mode = Control.FOCUS_NONE
+	_tab_btn_control.custom_minimum_size = Vector2(80, 22)
+	_tab_btn_control.add_theme_font_size_override("font_size", 11)
+	_tab_btn_control.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+	tab_bar.add_child(_tab_btn_control)
+
 	var tab_margin = Control.new()
 	tab_margin.custom_minimum_size = Vector2(0, 6)
 	tab_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -336,29 +351,12 @@ func build_ui():
 	disp_row2.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_display.add_child(disp_row2)
 
-	main._ui_ctrl_mode_btn = make_option_btn("Ctrl", "Off")
-	disp_row2.add_child(main._ui_ctrl_mode_btn)
-	main._ui_ctrl_type_btn = make_option_btn("Type", "PAD")
-	disp_row2.add_child(main._ui_ctrl_type_btn)
+	main._ui_curve_btn = make_option_btn("Curve", "Flat")
+	disp_row2.add_child(main._ui_curve_btn)
 	main._ui_sharpen_btn = make_option_btn("Sharp", "0%")
 	disp_row2.add_child(main._ui_sharpen_btn)
-
-	var disp_gap2 = Control.new()
-	disp_gap2.custom_minimum_size = Vector2(0, 10)
-	disp_gap2.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tab_display.add_child(disp_gap2)
-
-	var disp_row3 = HBoxContainer.new()
-	disp_row3.name = "DispRow3"
-	disp_row3.add_theme_constant_override("separation", 12)
-	disp_row3.alignment = BoxContainer.ALIGNMENT_CENTER
-	disp_row3.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	disp_row3.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	disp_row3.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tab_display.add_child(disp_row3)
-
 	main._ui_render_btn = make_option_btn("Smooth", "0%")
-	disp_row3.add_child(main._ui_render_btn)
+	disp_row2.add_child(main._ui_render_btn)
 
 	_tab_stream = VBoxContainer.new()
 	_tab_stream.name = "TabStream"
@@ -401,8 +399,6 @@ func build_ui():
 	stream_row2.add_child(main._ui_codec_btn)
 	main._ui_bezel_btn = make_option_btn("Bezel", "On")
 	stream_row2.add_child(main._ui_bezel_btn)
-	main._ui_curve_btn = make_option_btn("Curve", "Flat")
-	stream_row2.add_child(main._ui_curve_btn)
 
 	var stream_gap2 = Control.new()
 	stream_gap2.custom_minimum_size = Vector2(0, 10)
@@ -418,12 +414,52 @@ func build_ui():
 	stream_row3.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_stream.add_child(stream_row3)
 
+	main._ui_reconnect_btn = make_option_btn("Reconn", "On")
+	stream_row3.add_child(main._ui_reconnect_btn)
+	main._ui_idle_btn = make_option_btn("Idle", "Off")
+	stream_row3.add_child(main._ui_idle_btn)
+
+	_tab_control = VBoxContainer.new()
+	_tab_control.name = "TabControl"
+	_tab_control.add_theme_constant_override("separation", 0)
+	_tab_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tab_control.visible = false
+	vbox.add_child(_tab_control)
+
+	var control_row1 = HBoxContainer.new()
+	control_row1.name = "ControlRow1"
+	control_row1.add_theme_constant_override("separation", 12)
+	control_row1.alignment = BoxContainer.ALIGNMENT_CENTER
+	control_row1.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	control_row1.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	control_row1.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tab_control.add_child(control_row1)
+
 	main._ui_cursor_btn = make_option_btn("Cursor", "Circle")
-	stream_row3.add_child(main._ui_cursor_btn)
+	control_row1.add_child(main._ui_cursor_btn)
 	main._ui_steady_btn = make_option_btn("Steady", "Low")
-	stream_row3.add_child(main._ui_steady_btn)
-	main._ui_btn_toggle_btn = make_option_btn("Toggle", "Head")
-	stream_row3.add_child(main._ui_btn_toggle_btn)
+	control_row1.add_child(main._ui_steady_btn)
+
+	var control_gap1 = Control.new()
+	control_gap1.custom_minimum_size = Vector2(0, 10)
+	control_gap1.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tab_control.add_child(control_gap1)
+
+	var control_row2 = HBoxContainer.new()
+	control_row2.name = "ControlRow2"
+	control_row2.add_theme_constant_override("separation", 12)
+	control_row2.alignment = BoxContainer.ALIGNMENT_CENTER
+	control_row2.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	control_row2.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	control_row2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tab_control.add_child(control_row2)
+
+	main._ui_ctrl_mode_btn = make_option_btn("Toggle", "Off")
+	control_row2.add_child(main._ui_ctrl_mode_btn)
+	main._ui_ctrl_type_btn = make_option_btn("Mode", "PAD")
+	control_row2.add_child(main._ui_ctrl_type_btn)
+	main._ui_btn_toggle_btn = make_option_btn("Alt", "Head")
+	control_row2.add_child(main._ui_btn_toggle_btn)
 
 	main._ui_status_label = Label.new()
 	main._ui_status_label.name = "StatusLabel"
@@ -435,18 +471,6 @@ func build_ui():
 	main._ui_status_label.custom_minimum_size = Vector2(0, 28)
 	main._ui_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(main._ui_status_label)
-
-	var indicator_row = HBoxContainer.new()
-	indicator_row.name = "IndicatorRow"
-	indicator_row.add_theme_constant_override("separation", 12)
-	indicator_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	indicator_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(indicator_row)
-
-	main._ui_reconnect_btn = make_indicator_btn("Reconn", "On")
-	indicator_row.add_child(main._ui_reconnect_btn)
-	main._ui_idle_btn = make_indicator_btn("Idle", "Off")
-	indicator_row.add_child(main._ui_idle_btn)
 
 	var grab_gap = Control.new()
 	grab_gap.custom_minimum_size = Vector2(0, 8)
@@ -509,6 +533,7 @@ func build_ui():
 	main._ui_idle_btn.button_down.connect(func(): main.settings_controller.cycle_idle_timeout())
 	_tab_btn_display.button_down.connect(func(): switch_tab(0))
 	_tab_btn_stream.button_down.connect(func(): switch_tab(1))
+	_tab_btn_control.button_down.connect(func(): switch_tab(2))
 	switch_tab(0)
 	update_ctrl_mode_btn()
 	update_ctrl_type_btn()

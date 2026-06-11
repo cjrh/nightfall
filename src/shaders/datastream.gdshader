@@ -8,7 +8,8 @@ void fragment() {
 	float dots = dot_x * dot_y;
 	float fade_x = smoothstep(0.0, 0.15, UV.x) * smoothstep(1.0, 0.85, UV.x);
 	vec3 col = vec3(0.0, 0.8, 0.9);
+	float dist_fade = smoothstep(4.0, 8.0, length(VERTEX));
 	ALBEDO = col;
 	EMISSION = col * dots * 2.5;
-	ALPHA = dots * fade_x * 0.9;
+	ALPHA = dots * fade_x * dist_fade * 0.9;
 }

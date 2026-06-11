@@ -24,6 +24,7 @@ func get_stereo_mode() -> int:
 		return 4
 
 func cycle_sbs_mode():
+	main._log("[SBS-DEBUG] cycle_sbs_mode: old_sbs=%d ai_3d_mode=%d" % [main.sbs_mode, main.ai_3d_mode])
 	main.sbs_mode = (main.sbs_mode + 1) % 3
 	main.ui_controller.update_option_btn(main._ui_sbs_btn, sbs_labels[main.sbs_mode])
 	main.ui_controller.update_3d_btn_state()
@@ -42,7 +43,7 @@ func cycle_ai_3d_mode():
 
 func apply_stereo():
 	var mode = get_stereo_mode()
-	main._log("[STEREO] apply_stereo mode=%d use_comp=%s streaming=%s" % [mode, str(main.use_comp_layer), str(main.is_streaming)])
+	main._log("[SBS-DEBUG] apply_stereo: sbs_mode=%d ai_3d_mode=%d stereo_mode=%d comp_layer_available=%s use_comp=%s streaming=%s" % [main.sbs_mode, main.ai_3d_mode, mode, str(main.comp_layer_available), str(main.use_comp_layer), str(main.is_streaming)])
 	if main.comp_layer_available:
 		if mode > 0:
 			main._switch_to_stereo_comp_layer()
@@ -179,14 +180,14 @@ func cycle_auto_reconnect():
 	main.auto_reconnect_enabled = not main.auto_reconnect_enabled
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
-	main.ui_controller.update_indicator_btn(main._ui_reconnect_btn, "Reconn", "On" if main.auto_reconnect_enabled else "Off")
+	main.ui_controller.update_option_btn(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
 	main.state_manager.save_state()
 
 func cycle_idle_timeout():
 	var idx = idle_values.find(main.idle_timeout_min)
 	idx = (idx + 1) % idle_values.size()
 	main.idle_timeout_min = idle_values[idx]
-	main.ui_controller.update_indicator_btn(main._ui_idle_btn, "Idle", idle_labels[idx])
+	main.ui_controller.update_option_btn(main._ui_idle_btn, idle_labels[idx])
 	main.state_manager.save_state()
 
 func apply_filter():

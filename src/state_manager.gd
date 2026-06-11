@@ -124,12 +124,10 @@ func load_state():
 	if save.has_section_key("screen", "size_x"):
 		main._mesh_size = Vector2(save.get_value("screen", "size_x"), save.get_value("screen", "size_y"))
 		if main._mesh_size.x > 0.1 and main._mesh_size.y > 0.1:
-			if main.curvature == 0:
-				main.screen_mesh.mesh.size = main._mesh_size
-				main.screen_manager.set_screen_collision_flat(main._mesh_size)
-			else:
-				main.screen_manager.apply_curvature()
+			main.screen_manager.apply_curvature()
 			main.screen_manager.update_corner_positions()
+	else:
+		main.screen_manager.apply_curvature()
 	if main.bezel_mesh:
 		main.bezel_mesh.visible = main.bezel_enabled
 	main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
@@ -146,7 +144,7 @@ func load_state():
 	main.idle_timeout_min = save.get_value("stream", "idle_timeout_min", 0)
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
-	main.ui_controller.update_indicator_btn(main._ui_reconnect_btn, "Reconn", "On" if main.auto_reconnect_enabled else "Off")
+	main.ui_controller.update_option_btn(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
 	var idle_idx = main.settings_controller.idle_values.find(main.idle_timeout_min)
 	if idle_idx < 0: idle_idx = 0
-	main.ui_controller.update_indicator_btn(main._ui_idle_btn, "Idle", main.settings_controller.idle_labels[idle_idx])
+	main.ui_controller.update_option_btn(main._ui_idle_btn, main.settings_controller.idle_labels[idle_idx])
