@@ -70,9 +70,7 @@ var stats_fps: float = 0.0
 var stats_frame_times: Array = []
 var stats_network_events: int = 0
 var passthrough_mode: int = 0
-var passthrough_labels: Array = ["On", "Off", "Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
-var bg_names: Array = ["Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
-var bg_offsets: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0, 10, -20), Vector3(0, 10, 0), Vector3(0, -3, 0)]
+var passthrough_labels: Array = ["On", "Off", "Starfield"]
 var ui_visible: bool = false
 var bezel_enabled: bool = true
 var bezel_mesh: MeshInstance3D
@@ -81,8 +79,8 @@ var curvature_labels: Array = ["Flat", "Slight Curve", "Curved"]
 var smooth_mode: int = 0
 var sharpen_mode: int = 0
 var smooth_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
- var sharpen_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
- var _xr_base_render_scale: float = 1.0
+var sharpen_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
+var _xr_base_render_scale: float = 1.0
 var _xr_render_width: int = 1680
 var _mesh_size: Vector2 = Vector2(3.2, 1.8)
 var stream_fps: int = 60
@@ -186,12 +184,6 @@ var _ui_ctrl_mode_btn: Button
 var _ui_cursor_btn: Button
 var _ui_steady_btn: Button
 var _ui_codec_btn: Button
-var auto_reconnect_enabled: bool = true
-var _reconnecting: bool = false
-var idle_timeout_min: int = 0
-var _last_activity_time: float = 0.0
-var _ui_idle_btn: Button
-var _ui_reconnect_btn: Button
 var _ui_exit_btn: Button
 var _ui_disconnect_btn: Button
 var _ui_close_btn: Button
@@ -975,8 +967,10 @@ func _on_stream_started():
 		_set_ui_visible(false)
 		if comp_ui:
 			comp_ui.visible = false
-	if passthrough_mode < 2:
-		_hide_all_backgrounds()
+	var starfield = get_node_or_null("Starfield")
+	if starfield:
+		starfield.emitting = false
+		starfield.visible = false
 	var all_btn_flags = 0x1000|0x2000|0x4000|0x8000|0x0001|0x0002|0x0004|0x0008|0x0100|0x0200|0x0010|0x0020|0x0040|0x0080|0x0400
 	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
 
@@ -984,10 +978,6 @@ func _switch_to_comp_layer():
 	if not comp_layer_available:
 		use_comp_layer = false
 		_log("[COMP] Not available, using mesh rendering")
-		return
-	var stereo = settings_controller.get_stereo_mode() if settings_controller else 0
-	if stereo > 0:
-		_switch_to_stereo_comp_layer()
 		return
 	use_comp_layer = true
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -1011,35 +1001,6 @@ func _switch_to_comp_layer():
 	_make_screen_transparent()
 	bezel_mesh.visible = false
 	_update_comp_bezel()
-
-func _switch_to_stereo_comp_layer():
-	if not comp_layer_available:
-		use_comp_layer = false
-		_log("[COMP] Not available, cannot use stereo comp layer")
-		return
-	use_comp_layer = true
-	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	if comp_cylinder: comp_cylinder.visible = false
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	var stereo = settings_controller.get_stereo_mode()
-	comp_cylinder_left.visible = true
-	comp_cylinder_right.visible = true
-	comp_cylinder_left.set_layer_viewport(comp_viewport_left)
-	comp_cylinder_right.set_layer_viewport(comp_viewport_right)
-	comp_shader_mat_left.set_shader_parameter("stereo_mode", stereo)
-	comp_shader_mat_left.set_shader_parameter("eye_index", 1)
-	comp_shader_mat_right.set_shader_parameter("stereo_mode", stereo)
-	comp_shader_mat_right.set_shader_parameter("eye_index", 2)
-	comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	settings_controller.apply_3d_params()
-	_make_screen_transparent()
-	bezel_mesh.visible = false
-	_update_cylinder_params()
-	_update_comp_bezel()
-	if is_streaming:
-		_bind_yuv_textures()
-	_log("[COMP] Switched to stereo composition layer (mode=%d)" % stereo)
 
 func _switch_to_mesh_rendering():
 	use_comp_layer = false
@@ -1076,8 +1037,8 @@ func _switch_to_mesh_rendering():
 func _update_comp_layer_size():
 	_update_cylinder_params()
 
-func _on_stream_terminated(msg: String, err_code: int = 0):
-	_log("[NF] _on_stream_terminated: auto=" + str(_auto_connect) + " restarting=" + str(_restarting_stream) + " reconnecting=" + str(_reconnecting) + " msg=" + str(msg) + " err=" + str(err_code))
+func _on_stream_terminated(msg: String):
+	_log("[NF] _on_stream_terminated: auto=" + str(_auto_connect) + " restarting=" + str(_restarting_stream) + " msg=" + str(msg))
 	if _auto_connect:
 		_auto_connect = false
 		return
@@ -1093,33 +1054,17 @@ func _on_stream_terminated(msg: String, err_code: int = 0):
 			screen_mesh.material_override.set_shader_parameter("tex_u", null)
 			screen_mesh.material_override.set_shader_parameter("tex_v", null)
 		return
-	if auto_reconnect_enabled and err_code != 0:
-		_log("[RECONNECT] Keeping stream alive for auto-reconnect")
-		is_streaming = false
-		_ui_status_label.text = "Connection lost, reconnecting..."
-		return
-	_reconnecting = false
 	is_streaming = false
-	_full_disconnect_cleanup("Disconnected: " + str(msg))
-
-func _full_disconnect_cleanup(status_msg: String):
-	_connect_timeout_pending = false
 	_server_codec_support = {}
 	ui_controller.update_codec_btn()
-	_ui_status_label.text = status_msg
+	_ui_status_label.text = "Disconnected: " + str(msg)
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = false
-	_log("[STREAM] Full disconnect: %s" % status_msg)
-	welcome_screen.show_welcome_screen("welcome")
+	_log("[STREAM] Connection terminated: %s" % str(msg))
+	welcome_screen.show_welcome_screen("server")
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	_clear_comp_yuv_textures()
 	comp_shader_mat.set_shader_parameter("main_texture", welcome_viewport.get_texture())
 	comp_shader_mat.set_shader_parameter("yuv_mode", 0)
-	if comp_shader_mat_left:
-		comp_shader_mat_left.set_shader_parameter("main_texture", welcome_viewport.get_texture())
-		comp_shader_mat_left.set_shader_parameter("yuv_mode", 0)
-	if comp_shader_mat_right:
-		comp_shader_mat_right.set_shader_parameter("main_texture", welcome_viewport.get_texture())
-		comp_shader_mat_right.set_shader_parameter("yuv_mode", 0)
 	if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
 		screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
 		screen_mesh.material_override.set_shader_parameter("tex_y", null)
@@ -1142,13 +1087,6 @@ func _full_disconnect_cleanup(status_msg: String):
 	if comp_ui:
 		comp_ui.visible = false
 	welcome_screen.reset_connect_button()
-	if passthrough_mode >= 2:
-		var bg_idx = passthrough_mode - 2
-		if bg_idx >= 0 and bg_idx < bg_names.size():
-			var bg = get_node_or_null(bg_names[bg_idx])
-			if bg:
-				bg.visible = true
-				bg.emitting = true
 	welcome_screen.update_welcome_info()
 	stream_manager.resize_stream_viewport(1920, 1080)
 
@@ -1298,13 +1236,13 @@ func _ready():
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 0)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
-		passthrough_labels = ["On", "Off", "Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
+		passthrough_labels = ["On", "Off", "Starfield"]
 	else:
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 1)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 		passthrough_mode = 1
-		passthrough_labels = ["Off", "Starfield", "Warp", "Firefly", "Aurora", "Snow", "Data"]
+		passthrough_labels = ["Off", "Starfield"]
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
@@ -1317,7 +1255,7 @@ func _ready():
 
 	settings_controller.apply_display_refresh_rate()
 
-	_create_backgrounds()
+	_create_starfield()
 
 	_screen_mesh_original_mat = screen_mesh.material_override
 	_setup_comp_layer()
@@ -1515,13 +1453,6 @@ func _process(delta):
 			stats_timer = 0.0
 			stats_frame_times.clear()
 
-	if is_streaming and idle_timeout_min > 0:
-		var now = Time.get_ticks_msec() / 1000.0
-		if now - _last_activity_time > idle_timeout_min * 60.0:
-			_log("[IDLE] Idle timeout (%d min), disconnecting" % idle_timeout_min)
-			disconnect_stream()
-			_full_disconnect_cleanup("Idle timeout")
-
 	if grabbed_node:
 		xr_interaction.handle_grab()
 
@@ -1534,8 +1465,6 @@ func _notification(what):
 
 func _input(event):
 	input_handler.handle_input(event)
-	if is_streaming and (event is InputEventMouseButton or event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion):
-		_last_activity_time = Time.get_ticks_msec() / 1000.0
 
 func _toggle_ui():
 	ui_visible = not ui_visible
@@ -1698,26 +1627,6 @@ func _create_contact_dot():
 	pointer_cursor.extra_cull_margin = 10.0
 	add_child(pointer_cursor)
 
-func _hide_all_backgrounds():
-	for name in bg_names:
-		var bg = get_node_or_null(name)
-		if bg:
-			bg.visible = false
-			bg.emitting = false
-
-func _create_backgrounds():
-	_create_starfield()
-	_create_warp()
-	_create_firefly()
-	_create_aurora()
-	_create_snow()
-	_create_data()
-	var active_bg = passthrough_mode - 2
-	for i in range(bg_names.size()):
-		var bg = get_node_or_null(bg_names[i])
-		if bg:
-			bg.visible = (i == active_bg)
-
 func _create_starfield():
 	var particles = GPUParticles3D.new()
 	particles.name = "Starfield"
@@ -1750,167 +1659,4 @@ func _create_starfield():
 	particles.draw_pass_1 = star_mesh
 	particles.sorting_offset = -100.0
 	particles.position = xr_camera.global_position
-	add_child(particles)
-
-func _create_warp():
-	var particles = GPUParticles3D.new()
-	particles.name = "Warp"
-	particles.emitting = true
-	particles.amount = 200
-	particles.lifetime = 4.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 0
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(30, 30, 30)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	mat.direction = Vector3(0, 0, 1)
-	mat.spread = 30.0
-	mat.initial_velocity_min = 15.0
-	mat.initial_velocity_max = 35.0
-	particles.process_material = mat
-	var dot = SphereMesh.new()
-	dot.radius = 0.04
-	dot.height = 0.08
-	var sh = load("res://src/shaders/warp.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	dot.material = sm
-	particles.draw_pass_1 = dot
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position
-	add_child(particles)
-
-func _create_firefly():
-	var particles = GPUParticles3D.new()
-	particles.name = "Firefly"
-	particles.emitting = true
-	particles.amount = 50
-	particles.lifetime = 30.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 10
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(15, 10, 15)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	mat.direction = Vector3(0, 0, 0)
-	mat.spread = 0.0
-	particles.process_material = mat
-	var dot = SphereMesh.new()
-	dot.radius = 0.08
-	dot.height = 0.16
-	var sh = load("res://src/shaders/firefly.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	dot.material = sm
-	particles.draw_pass_1 = dot
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position
-	add_child(particles)
-
-func _create_aurora():
-	var particles = GPUParticles3D.new()
-	particles.name = "Aurora"
-	particles.emitting = true
-	particles.amount = 20
-	particles.lifetime = 30.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 10
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(40, 3, 15)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	mat.direction = Vector3(0, 0, 0)
-	mat.spread = 0.0
-	particles.process_material = mat
-	var quad = QuadMesh.new()
-	quad.size = Vector2(14.0, 3.0)
-	var sh = load("res://src/shaders/aurora.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	quad.material = sm
-	particles.draw_pass_1 = quad
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position + Vector3(0, 10, -20)
-	add_child(particles)
-
-func _create_snow():
-	var particles = GPUParticles3D.new()
-	particles.name = "Snow"
-	particles.emitting = true
-	particles.amount = 150
-	particles.lifetime = 15.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 0
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(20, 2, 20)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3(0, -1.0, 0)
-	mat.direction = Vector3(0, -1, 0)
-	mat.spread = 15.0
-	mat.initial_velocity_min = 0.3
-	mat.initial_velocity_max = 1.0
-	particles.process_material = mat
-	var flake = QuadMesh.new()
-	flake.size = Vector2(0.25, 0.25)
-	var sh = load("res://src/shaders/snow.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	flake.material = sm
-	particles.draw_pass_1 = flake
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position + Vector3(0, 10, 0)
-	add_child(particles)
-
-func _create_data():
-	var particles = GPUParticles3D.new()
-	particles.name = "Data"
-	particles.emitting = true
-	particles.amount = 100
-	particles.lifetime = 6.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 0
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(20, 2, 20)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3(0, 3.0, 0)
-	mat.direction = Vector3(0, 1, 0)
-	mat.spread = 5.0
-	mat.initial_velocity_min = 1.0
-	mat.initial_velocity_max = 3.0
-	particles.process_material = mat
-	var quad = QuadMesh.new()
-	quad.size = Vector2(0.3, 1.0)
-	var sh = load("res://src/shaders/datastream.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	quad.material = sm
-	particles.draw_pass_1 = quad
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position + Vector3(0, -3, 0)
 	add_child(particles)
