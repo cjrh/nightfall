@@ -969,7 +969,7 @@ func _on_stream_started():
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = true
 	_log("[STREAM] Connection started!")
 	if not use_comp_layer:
-		stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	stream_manager.bind_texture()
 	_bind_yuv_textures()
@@ -1010,7 +1010,7 @@ func _switch_to_comp_layer():
 		comp_layer.set_layer_viewport(comp_viewport)
 		comp_layer.visible = true
 		_log("[COMP] Switched to composition layer (quad fallback)")
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED if is_streaming else SubViewport.UPDATE_ALWAYS
+	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	comp_shader_mat.set_shader_parameter("stereo_mode", 0)
 	settings_controller.apply_filter()
 	_make_screen_transparent()
@@ -1026,7 +1026,7 @@ func _switch_to_stereo_comp_layer():
 	use_comp_layer = true
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if comp_cylinder: comp_cylinder.visible = false
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED if is_streaming else SubViewport.UPDATE_ALWAYS
+	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	var stereo = settings_controller.get_stereo_mode()
 	_log("[SBS-DEBUG] stereo=%d comp_cylinder_left=%s comp_cylinder_right=%s comp_viewport_left=%s comp_viewport_right=%s" % [stereo, str(comp_cylinder_left), str(comp_cylinder_right), str(comp_viewport_left), str(comp_viewport_right)])
 	_log("[SBS-DEBUG] comp_shader_mat_left=%s comp_shader_mat_right=%s" % [str(comp_shader_mat_left), str(comp_shader_mat_right)])
@@ -1038,8 +1038,8 @@ func _switch_to_stereo_comp_layer():
 	comp_shader_mat_left.set_shader_parameter("eye_index", 1)
 	comp_shader_mat_right.set_shader_parameter("stereo_mode", stereo)
 	comp_shader_mat_right.set_shader_parameter("eye_index", 2)
-	comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED if is_streaming else SubViewport.UPDATE_ALWAYS
-	comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_DISABLED if is_streaming else SubViewport.UPDATE_ALWAYS
+	comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_make_screen_transparent()
 	bezel_mesh.visible = false
 	_update_cylinder_params()
@@ -1050,7 +1050,7 @@ func _switch_to_stereo_comp_layer():
 
 func _switch_to_mesh_rendering():
 	use_comp_layer = false
-	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if is_streaming else SubViewport.UPDATE_DISABLED
 	if comp_cylinder: comp_cylinder.visible = false
 	if comp_cylinder_left: comp_cylinder_left.visible = false
 	if comp_cylinder_right: comp_cylinder_right.visible = false
@@ -1058,7 +1058,7 @@ func _switch_to_mesh_rendering():
 	if comp_kb: comp_kb.visible = false
 	if comp_cursor: comp_cursor.visible = false
 	if comp_viewport:
-		comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED if is_streaming else SubViewport.UPDATE_ALWAYS
+		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	if comp_viewport_left:
 		comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	if comp_viewport_right:
@@ -1068,7 +1068,7 @@ func _switch_to_mesh_rendering():
 	_restore_kb_material()
 	bezel_mesh.visible = bezel_enabled
 	if is_streaming:
-		stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		var mat = screen_mesh.material_override
 		_log("[MESH] material type=%s" % str(mat.get_class()) if mat else "[MESH] material is null")
 		mat.set_shader_parameter("main_texture", stream_viewport.get_texture())
@@ -1491,18 +1491,6 @@ func _process(delta):
 				comp_shader_mat_right.set_shader_parameter("depth_texture", dt)
 
 	if is_streaming:
-		var new_frame = stream_backend.consume_new_frame()
-		if new_frame:
-			if use_comp_layer:
-				var stereo = settings_controller.get_stereo_mode() if settings_controller else 0
-				if stereo > 0:
-					if comp_viewport_left: comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_ONCE
-					if comp_viewport_right: comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_ONCE
-				else:
-					if comp_viewport: comp_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
-			else:
-				if stream_viewport: stream_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
-
 		if use_comp_layer:
 			var need_bind = false
 			if comp_shader_mat and comp_shader_mat.get_shader_parameter("yuv_mode") == 0:

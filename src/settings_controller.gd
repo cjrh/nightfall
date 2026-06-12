@@ -216,8 +216,9 @@ func apply_display_refresh_rate():
 		return
 	var target_hz: float = 90.0
 	match main.stream_fps:
-		30: target_hz = 120.0
-		60: target_hz = 120.0
+		30: target_hz = 90.0
+		60: target_hz = 72.0
+		72: target_hz = 72.0
 		90: target_hz = 90.0
 		120: target_hz = 120.0
 	var available = interface.get_available_display_refresh_rates()
@@ -234,10 +235,11 @@ func apply_display_refresh_rate():
 		best = available[available.size() - 1]
 	interface.set_display_refresh_rate(best)
 	main.display_refresh_rate = best
+	Engine.max_fps = 0
 	main._log("[REFRESH] Set headset to %.0fHz (target %.0fHz for %dfps)" % [best, target_hz, main.stream_fps])
 
 func cycle_fps():
-	var rates = [30, 60, 90, 120]
+	var rates = [30, 60, 72, 90, 120]
 	var idx = rates.find(main.stream_fps)
 	main.stream_fps = rates[(idx + 1) % rates.size()]
 	main.ui_controller.update_option_btn(main._ui_fps_btn, "%d" % main.stream_fps)
