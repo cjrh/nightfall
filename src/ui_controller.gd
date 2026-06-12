@@ -87,11 +87,6 @@ func switch_tab(tab: int):
 func build_ui():
 	main.ui_panel_3d.mesh.size = main._ui_mesh_size
 	main.ui_viewport.size = main._ui_viewport_size
-	main.ui_viewport.size_2d_override = main._ui_viewport_override
-	main.ui_viewport.size_2d_override_stretch = true
-	var ui_mat = main.ui_panel_3d.material_override
-	if ui_mat:
-		ui_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	var col_shape = main.ui_panel_3d.get_node("Area3D/CollisionShape3D")
 	if col_shape and col_shape.shape:
 		# Increase the hitbox size by 0.2m on width and height to make clicking much easier

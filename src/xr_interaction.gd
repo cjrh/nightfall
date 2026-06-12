@@ -138,10 +138,9 @@ func handle_pointer_interaction():
 			var half_h = main._ui_mesh_size.y / 2.0
 			var nx = clampf((local_pos.x / half_w + 1.0) / 2.0, 0.0, 1.0)
 			var ny = clampf(1.0 - (local_pos.y / half_h + 1.0) / 2.0, 0.0, 1.0)
-			var pixel_pos_logical = Vector2(nx * main._ui_viewport_override.x, ny * main._ui_viewport_override.y)
-			var pixel_pos_physical = Vector2(nx * main._ui_viewport_size.x, ny * main._ui_viewport_size.y)
+			var pixel_pos = Vector2(nx * main._ui_viewport_size.x, ny * main._ui_viewport_size.y)
 
-			var is_grab_bar = _is_ui_grab_bar(pixel_pos_logical)
+			var is_grab_bar = _is_ui_grab_bar(pixel_pos)
 			if main.grabbed_node == main.ui_panel_3d:
 				main.set_comp_grab_bar_color(main.ui_viewport, Color(1, 1, 1, 0.8))
 			elif is_grab_bar and main.grabbed_corner_idx < 0:
@@ -166,16 +165,16 @@ func handle_pointer_interaction():
 
 			if not is_grab_bar:
 				var motion = InputEventMouseMotion.new()
-				motion.position = pixel_pos_physical
-				motion.global_position = pixel_pos_physical
+				motion.position = pixel_pos
+				motion.global_position = pixel_pos
 				motion.button_mask = MOUSE_BUTTON_MASK_LEFT if is_now_clicking else 0
 				main.ui_viewport.push_input(motion)
 
 				if is_now_clicking and not main.was_clicking:
-					_push_ui_click(pixel_pos_physical, true)
+					_push_ui_click(pixel_pos, true)
 					main.was_clicking = true
 				elif not is_now_clicking and main.was_clicking:
-					_push_ui_click(pixel_pos_physical, false)
+					_push_ui_click(pixel_pos, false)
 					main.was_clicking = false
 			return
 
