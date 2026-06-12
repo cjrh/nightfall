@@ -136,8 +136,8 @@ func handle_pointer_interaction():
 			var local_pos = main.ui_panel_3d.to_local(hit_pos)
 			var half_w = main._ui_mesh_size.x / 2.0
 			var half_h = main._ui_mesh_size.y / 2.0
-			var nx = (local_pos.x / half_w + 1.0) / 2.0
-			var ny = 1.0 - (local_pos.y / half_h + 1.0) / 2.0
+			var nx = clampf((local_pos.x / half_w + 1.0) / 2.0, 0.0, 1.0)
+			var ny = clampf(1.0 - (local_pos.y / half_h + 1.0) / 2.0, 0.0, 1.0)
 			var pixel_pos_logical = Vector2(nx * main._ui_viewport_override.x, ny * main._ui_viewport_override.y)
 			var pixel_pos_physical = Vector2(nx * main._ui_viewport_size.x, ny * main._ui_viewport_size.y)
 

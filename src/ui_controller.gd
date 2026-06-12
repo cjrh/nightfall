@@ -94,7 +94,8 @@ func build_ui():
 		ui_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	var col_shape = main.ui_panel_3d.get_node("Area3D/CollisionShape3D")
 	if col_shape and col_shape.shape:
-		col_shape.shape.size = Vector3(main._ui_mesh_size.x, main._ui_mesh_size.y, 0.01)
+		# Increase the hitbox size by 0.2m on width and height to make clicking much easier
+		col_shape.shape.size = Vector3(main._ui_mesh_size.x + 0.20, main._ui_mesh_size.y + 0.20, 0.05)
 	var root = main.get_node("%UIRoot")
 	for child in root.get_children():
 		if child.name != "IPInput" and child.name != "Numpad":
