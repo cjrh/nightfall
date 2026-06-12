@@ -214,10 +214,10 @@ func apply_display_refresh_rate():
 	var interface = XRServer.find_interface("OpenXR")
 	if not interface:
 		return
-	var target_hz: float = 72.0
+	var target_hz: float = 90.0
 	match main.stream_fps:
-		30: target_hz = 72.0
-		60: target_hz = 72.0
+		30: target_hz = 120.0
+		60: target_hz = 120.0
 		90: target_hz = 90.0
 		120: target_hz = 120.0
 	var available = interface.get_available_display_refresh_rates()

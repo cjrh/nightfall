@@ -330,7 +330,7 @@ func build_ui():
 	disp_row1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_display.add_child(disp_row1)
 
-	main._ui_pt_btn = make_option_btn("PT", "On")
+	main._ui_pt_btn = make_option_btn("Passthrough", "On")
 	disp_row1.add_child(main._ui_pt_btn)
 	main._ui_sbs_btn = make_option_btn("SBS", "Off")
 	disp_row1.add_child(main._ui_sbs_btn)
@@ -353,9 +353,9 @@ func build_ui():
 
 	main._ui_curve_btn = make_option_btn("Curve", "Flat")
 	disp_row2.add_child(main._ui_curve_btn)
-	main._ui_sharpen_btn = make_option_btn("Sharp", "0%")
+	main._ui_sharpen_btn = make_option_btn("Sharpen", "0%")
 	disp_row2.add_child(main._ui_sharpen_btn)
-	main._ui_render_btn = make_option_btn("Smooth", "0%")
+	main._ui_render_btn = make_option_btn("Blur", "0%")
 	disp_row2.add_child(main._ui_render_btn)
 
 	_tab_stream = VBoxContainer.new()
@@ -374,11 +374,11 @@ func build_ui():
 	stream_row1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_stream.add_child(stream_row1)
 
-	main._ui_res_btn = make_option_btn("Res", "HD")
+	main._ui_res_btn = make_option_btn("Resolution", "HD")
 	stream_row1.add_child(main._ui_res_btn)
 	main._ui_fps_btn = make_option_btn("FPS", "60")
 	stream_row1.add_child(main._ui_fps_btn)
-	main._ui_bitrate_btn = make_option_btn("Mbit", "Auto")
+	main._ui_bitrate_btn = make_option_btn("Bitrate", "Auto")
 	stream_row1.add_child(main._ui_bitrate_btn)
 
 	var stream_gap1 = Control.new()
@@ -397,27 +397,10 @@ func build_ui():
 
 	main._ui_codec_btn = make_option_btn("Codec", "HEVC")
 	stream_row2.add_child(main._ui_codec_btn)
-	main._ui_bezel_btn = make_option_btn("Bezel", "On")
-	stream_row2.add_child(main._ui_bezel_btn)
-
-	var stream_gap2 = Control.new()
-	stream_gap2.custom_minimum_size = Vector2(0, 10)
-	stream_gap2.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tab_stream.add_child(stream_gap2)
-
-	var stream_row3 = HBoxContainer.new()
-	stream_row3.name = "StreamRow3"
-	stream_row3.add_theme_constant_override("separation", 12)
-	stream_row3.alignment = BoxContainer.ALIGNMENT_CENTER
-	stream_row3.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	stream_row3.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	stream_row3.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tab_stream.add_child(stream_row3)
-
-	main._ui_reconnect_btn = make_option_btn("Reconn", "On")
-	stream_row3.add_child(main._ui_reconnect_btn)
-	main._ui_idle_btn = make_option_btn("Idle", "Off")
-	stream_row3.add_child(main._ui_idle_btn)
+	main._ui_reconnect_btn = make_option_btn("Auto-Reconnect", "On")
+	stream_row2.add_child(main._ui_reconnect_btn)
+	main._ui_idle_btn = make_option_btn("Idle Disconnect", "Off")
+	stream_row2.add_child(main._ui_idle_btn)
 
 	_tab_control = VBoxContainer.new()
 	_tab_control.name = "TabControl"
@@ -435,10 +418,12 @@ func build_ui():
 	control_row1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_control.add_child(control_row1)
 
-	main._ui_cursor_btn = make_option_btn("Cursor", "Circle")
+	main._ui_cursor_btn = make_option_btn("Cursor Type", "Circle")
 	control_row1.add_child(main._ui_cursor_btn)
-	main._ui_steady_btn = make_option_btn("Steady", "Low")
+	main._ui_steady_btn = make_option_btn("Cursor Steady", "Low")
 	control_row1.add_child(main._ui_steady_btn)
+	main._ui_bezel_btn = make_option_btn("Bezel", "On")
+	control_row1.add_child(main._ui_bezel_btn)
 
 	var control_gap1 = Control.new()
 	control_gap1.custom_minimum_size = Vector2(0, 10)
@@ -454,11 +439,11 @@ func build_ui():
 	control_row2.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_control.add_child(control_row2)
 
-	main._ui_ctrl_mode_btn = make_option_btn("Toggle", "Off")
+	main._ui_ctrl_mode_btn = make_option_btn("Mapping", "Off")
 	control_row2.add_child(main._ui_ctrl_mode_btn)
-	main._ui_ctrl_type_btn = make_option_btn("Mode", "PAD")
+	main._ui_ctrl_type_btn = make_option_btn("Device Mode", "PAD")
 	control_row2.add_child(main._ui_ctrl_type_btn)
-	main._ui_btn_toggle_btn = make_option_btn("Alt", "Head")
+	main._ui_btn_toggle_btn = make_option_btn("Alternate Mode", "Head")
 	control_row2.add_child(main._ui_btn_toggle_btn)
 
 	main._ui_status_label = Label.new()
@@ -551,7 +536,7 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	var pressed_style = main._btn_hover.duplicate()
 	pressed_style.bg_color = Color(1, 1, 1, 0.18)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
-	btn.custom_minimum_size = Vector2(100, 44)
+	btn.custom_minimum_size = Vector2(125, 55)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return btn
 
@@ -570,6 +555,10 @@ func update_ctrl_mode_btn():
 func update_ctrl_type_btn():
 	if main._ui_ctrl_type_btn and main.controller_mapper:
 		update_option_btn(main._ui_ctrl_type_btn, main.controller_mapper.type_labels[main.controller_mapper.ctrl_type])
+		if main._ui_btn_toggle_btn:
+			var is_kbm = (main.controller_mapper.ctrl_type == 2)
+			main._ui_btn_toggle_btn.disabled = is_kbm
+			main._ui_btn_toggle_btn.modulate = Color(1, 1, 1, 0.3) if is_kbm else Color(1, 1, 1, 1)
 
 func update_btn_toggle_btn():
 	if main._ui_btn_toggle_btn and main.controller_mapper:
