@@ -87,6 +87,11 @@ func switch_tab(tab: int):
 func build_ui():
 	main.ui_panel_3d.mesh.size = main._ui_mesh_size
 	main.ui_viewport.size = main._ui_viewport_size
+	main.ui_viewport.size_2d_override = main._ui_viewport_override
+	main.ui_viewport.size_2d_override_stretch = true
+	var ui_mat = main.ui_panel_3d.material_override
+	if ui_mat:
+		ui_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	var col_shape = main.ui_panel_3d.get_node("Area3D/CollisionShape3D")
 	if col_shape and col_shape.shape:
 		col_shape.shape.size = Vector3(main._ui_mesh_size.x, main._ui_mesh_size.y, 0.01)
@@ -536,7 +541,7 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	var pressed_style = main._btn_hover.duplicate()
 	pressed_style.bg_color = Color(1, 1, 1, 0.18)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
-	btn.custom_minimum_size = Vector2(125, 55)
+	btn.custom_minimum_size = Vector2(125, 66)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return btn
 
