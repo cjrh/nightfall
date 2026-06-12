@@ -1547,6 +1547,8 @@ func _toggle_ui():
 	ui_visible = not ui_visible
 	_set_ui_visible(ui_visible)
 	if ui_visible:
+		if state_manager:
+			state_manager.sync_ui_to_settings()
 		if comp_ui:
 			comp_ui.visible = true
 			comp_ui.global_position = ui_panel_3d.global_position

@@ -466,16 +466,19 @@ func _set_corner_color(handle: MeshInstance3D, color: Color, alpha: float = 1.0)
 func _compute_parallax_shift(uv_x: float) -> float:
 	if not main.depth_estimator or not main.depth_estimator.depth_texture:
 		return 0.0
+	var mat = main.screen_mesh.material_override
+	if not mat or not mat is ShaderMaterial:
+		return 0.0
 	var tex = main.depth_estimator.depth_texture
 	var img = tex.get_image()
 	if not img or img.is_empty():
 		return 0.0
 	var parallax = 0.042
 	var half_parallax = parallax * 0.5
-	var convergence = main.screen_mesh.material_override.get_shader_parameter("convergence")
+	var convergence = mat.get_shader_parameter("convergence")
 	if convergence == null:
 		convergence = 0.5
-	var balance_shift = main.screen_mesh.material_override.get_shader_parameter("balance_shift")
+	var balance_shift = mat.get_shader_parameter("balance_shift")
 	if balance_shift == null:
 		balance_shift = 0.5
 	var depth_x = int(clampf(uv_x - half_parallax, 0.0, 1.0) * (img.get_width() - 1))

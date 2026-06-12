@@ -178,8 +178,10 @@ cp "$SCRIPT_DIR/android/src/main/assets/midas-midas-v2-w8a8.tflite" android/buil
 cp "$SCRIPT_DIR/android/src/main/assets/depth-anything-v2-small.tflite" android/build/src/main/assets/ 2>/dev/null || true
 sed -i '/implementation "androidx.documentfile:documentfile/a\\n    implementation "org.tensorflow:tensorflow-lite:2.16.1"' android/build/build.gradle
 if [ "$PRESET" = "NightfallDev" ]; then
+  mkdir -p android/build/libs/debug
   cp "$SCRIPT_DIR/addons/godotopenxrvendors/.bin/android/debug/godotopenxr-meta-debug.aar" android/build/libs/debug/ 2>/dev/null || true
 else
+  mkdir -p android/build/libs/release
   cp "$SCRIPT_DIR/addons/godotopenxrvendors/.bin/android/release/godotopenxr-meta-release.aar" android/build/libs/release/ 2>/dev/null || true
 fi
 

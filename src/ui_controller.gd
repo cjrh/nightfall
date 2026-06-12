@@ -543,9 +543,16 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	return btn
 
 func update_option_btn(btn: Button, value: String):
+	if btn == null:
+		main._log("[UI] update_option_btn: btn is null! value=%s" % value)
+		return
+	var old_text = btn.text
 	var parts = btn.text.split("\n")
 	if parts.size() >= 2:
 		btn.text = parts[0] + "\n" + value
+		main._log("[UI] update_option_btn: '%s' -> '%s' (parts: %s)" % [old_text.replace("\n", "\\n"), btn.text.replace("\n", "\\n"), str(parts)])
+	else:
+		main._log("[UI] update_option_btn: failed to split btn.text='%s' (parts: %s)" % [btn.text.replace("\n", "\\n"), str(parts)])
 
 func update_codec_btn():
 	main.ui_controller.update_option_btn(main._ui_codec_btn, main.codec_labels[main.codec_preference])
