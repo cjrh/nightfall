@@ -24,7 +24,6 @@ func get_stereo_mode() -> int:
 		return 4
 
 func cycle_sbs_mode():
-	main._log("[SBS-DEBUG] cycle_sbs_mode: old_sbs=%d ai_3d_mode=%d" % [main.sbs_mode, main.ai_3d_mode])
 	main.sbs_mode = (main.sbs_mode + 1) % 3
 	main.ui_controller.update_option_btn(main._ui_sbs_btn, sbs_labels[main.sbs_mode])
 	main.ui_controller.update_3d_btn_state()
@@ -43,7 +42,6 @@ func cycle_ai_3d_mode():
 
 func apply_stereo():
 	var mode = get_stereo_mode()
-	main._log("[SBS-DEBUG] apply_stereo: sbs_mode=%d ai_3d_mode=%d stereo_mode=%d comp_layer_available=%s use_comp=%s streaming=%s" % [main.sbs_mode, main.ai_3d_mode, mode, str(main.comp_layer_available), str(main.use_comp_layer), str(main.is_streaming)])
 	if main.comp_layer_available:
 		if mode > 0:
 			main._switch_to_stereo_comp_layer()

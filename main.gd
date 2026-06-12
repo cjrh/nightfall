@@ -989,7 +989,6 @@ func _switch_to_comp_layer():
 		_log("[COMP] Not available, using mesh rendering")
 		return
 	var stereo = settings_controller.get_stereo_mode() if settings_controller else 0
-	_log("[SBS-DEBUG] _switch_to_comp_layer: stereo=%d" % stereo)
 	if stereo > 0:
 		_switch_to_stereo_comp_layer()
 		return
@@ -1017,7 +1016,6 @@ func _switch_to_comp_layer():
 	_update_comp_bezel()
 
 func _switch_to_stereo_comp_layer():
-	_log("[SBS-DEBUG] _switch_to_stereo_comp_layer called, comp_layer_available=%s" % str(comp_layer_available))
 	if not comp_layer_available:
 		use_comp_layer = false
 		_log("[COMP] Not available, cannot use stereo comp layer")
@@ -1027,8 +1025,6 @@ func _switch_to_stereo_comp_layer():
 	if comp_cylinder: comp_cylinder.visible = false
 	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	var stereo = settings_controller.get_stereo_mode()
-	_log("[SBS-DEBUG] stereo=%d comp_cylinder_left=%s comp_cylinder_right=%s comp_viewport_left=%s comp_viewport_right=%s" % [stereo, str(comp_cylinder_left), str(comp_cylinder_right), str(comp_viewport_left), str(comp_viewport_right)])
-	_log("[SBS-DEBUG] comp_shader_mat_left=%s comp_shader_mat_right=%s" % [str(comp_shader_mat_left), str(comp_shader_mat_right)])
 	comp_cylinder_left.visible = true
 	comp_cylinder_right.visible = true
 	comp_cylinder_left.set_layer_viewport(comp_viewport_left)

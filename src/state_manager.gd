@@ -84,11 +84,9 @@ func load_host_state(ip: String):
 	main.settings_controller.apply_stereo()
 
 func sync_ui_to_settings():
-	main._log("[STATE] sync_ui_to_settings: curvature=%d cursor_mode=%d" % [main.curvature, main.cursor_mode])
 	if main.bezel_mesh:
 		main.bezel_mesh.visible = main.bezel_enabled
 	if main.ui_controller:
-		main._log("[STATE] ui_controller present, updating buttons...")
 		main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
 		main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[clampi(main.curvature, 0, main.curvature_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[clampi(main.passthrough_mode, 0, main.passthrough_labels.size() - 1)])
