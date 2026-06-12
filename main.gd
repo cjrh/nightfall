@@ -1731,7 +1731,7 @@ func _create_starfield():
 	particles.lifetime = 30.0
 	particles.explosiveness = 0.0
 	particles.randomness = 1.0
-	particles.fixed_fps = 10
+	particles.fixed_fps = 30
 	particles.local_coords = true
 	particles.visible = false
 	var mat = ParticleProcessMaterial.new()
@@ -1765,7 +1765,7 @@ func _create_ash():
 	particles.lifetime = 4.0
 	particles.explosiveness = 0.0
 	particles.randomness = 1.0
-	particles.fixed_fps = 0
+	particles.fixed_fps = 30
 	particles.local_coords = true
 	particles.visible = false
 	var mat = ParticleProcessMaterial.new()
@@ -1799,7 +1799,7 @@ func _create_snow():
 	particles.lifetime = 15.0
 	particles.explosiveness = 0.0
 	particles.randomness = 1.0
-	particles.fixed_fps = 0
+	particles.fixed_fps = 30
 	particles.local_coords = true
 	particles.visible = false
 	var mat = ParticleProcessMaterial.new()
@@ -1832,7 +1832,7 @@ func _create_data():
 	particles.lifetime = 6.0
 	particles.explosiveness = 0.0
 	particles.randomness = 1.0
-	particles.fixed_fps = 0
+	particles.fixed_fps = 30
 	particles.local_coords = true
 	particles.visible = false
 	var mat = ParticleProcessMaterial.new()

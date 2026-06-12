@@ -74,7 +74,7 @@ func toggle_passthrough():
 	main.passthrough_mode = (main.passthrough_mode + 1) % main.passthrough_labels.size()
 	main._log("[PT] mode=%d labels=%s" % [main.passthrough_mode, str(main.passthrough_labels.size())])
 	main._flush_log()
-	var has_alpha_blend = main.passthrough_labels.size() == 8
+	var has_alpha_blend = main.passthrough_labels.has("On")
 	_hide_all_backgrounds()
 	if has_alpha_blend and main.passthrough_mode == 0:
 		main.get_viewport().transparent_bg = true

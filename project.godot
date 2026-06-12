@@ -36,6 +36,7 @@ ui_cancel={
 
 [rendering]
 
+viewport/hdr_3d=false
 textures/vram_compression/import_etc2_astc=true
 
 [xr]
