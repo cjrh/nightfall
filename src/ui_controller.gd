@@ -114,6 +114,7 @@ func build_ui():
 	var panel_bg = StyleBoxFlat.new()
 	panel_bg.bg_color = Color(0.06, 0.06, 0.1, 0.92)
 	panel_bg.set_corner_radius_all(16)
+	panel_bg.set_content_margin_all(0)
 
 	var panel = PanelContainer.new()
 	panel.name = "Panel"
@@ -495,7 +496,7 @@ func build_ui():
 	grab_bar_center.add_child(grab_right_spacer)
 
 	var bottom_margin = Control.new()
-	bottom_margin.custom_minimum_size = Vector2(0, 4)
+	bottom_margin.custom_minimum_size = Vector2(0, 16)
 	bottom_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(bottom_margin)
 
