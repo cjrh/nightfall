@@ -32,7 +32,7 @@ func handle_pointer_interaction():
 				var uv_y = uv.y
 				if main.settings_controller.get_stereo_mode() >= 3:
 					var shift = _compute_parallax_shift(uv_x)
-					uv_x = clampf(uv_x - shift, 0.0, 1.0)
+					uv_x = clampf(uv_x + shift + 0.0075, 0.0, 1.0)
 				var host_x = int(uv_x * main.stream_viewport.size.x)
 				var host_y = int(uv_y * main.stream_viewport.size.y)
 				main.stream_backend.send_mouse_position_event(host_x, host_y, main.stream_viewport.size.x, main.stream_viewport.size.y)
@@ -258,7 +258,7 @@ func handle_pointer_interaction():
 			var uv_y = uv.y
 			if main.settings_controller.get_stereo_mode() >= 3:
 				var shift = _compute_parallax_shift(uv_x)
-				uv_x = clampf(uv_x - shift, 0.0, 1.0)
+				uv_x = clampf(uv_x + shift + 0.0075, 0.0, 1.0)
 			var host_x = int(uv_x * main.stream_viewport.size.x)
 			var host_y = int(uv_y * main.stream_viewport.size.y)
 

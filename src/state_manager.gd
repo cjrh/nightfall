@@ -83,9 +83,32 @@ func load_host_state(ip: String):
 		main.depth_estimator.set_enabled(main.settings_controller.get_stereo_mode() >= 3)
 	main.settings_controller.apply_stereo()
 
+func sync_ui_to_settings():
+	if main.bezel_mesh:
+		main.bezel_mesh.visible = main.bezel_enabled
+	if main.ui_controller:
+		main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
+		main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[clampi(main.curvature, 0, main.curvature_labels.size() - 1)])
+		main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[clampi(main.passthrough_mode, 0, main.passthrough_labels.size() - 1)])
+		main.ui_controller.update_option_btn(main._ui_render_btn, main.smooth_labels[clampi(main.smooth_mode, 0, main.smooth_labels.size() - 1)])
+		main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[clampi(main.sharpen_mode, 0, main.sharpen_labels.size() - 1)])
+		main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[clampi(main.cursor_mode, 0, main.cursor_labels.size() - 1)])
+		main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[clampi(main.pointer_steady, 0, main.pointer_steady_labels.size() - 1)])
+		main.ui_controller.update_codec_btn()
+		main.ui_controller.update_option_btn(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
+		var idle_idx = main.settings_controller.idle_values.find(main.idle_timeout_min)
+		if idle_idx < 0: idle_idx = 0
+		main.ui_controller.update_option_btn(main._ui_idle_btn, main.settings_controller.idle_labels[idle_idx])
+	if main.screen_manager:
+		main.screen_manager.update_bezel_size()
+	if main.settings_controller:
+		main.settings_controller.apply_filter()
+
 func load_state():
 	var save = ConfigFile.new()
 	if save.load("user://app_state.cfg") != OK:
+		main.screen_manager.apply_curvature()
+		sync_ui_to_settings()
 		return
 
 	main.bezel_enabled = save.get_value("screen", "bezel", true)
@@ -128,23 +151,9 @@ func load_state():
 			main.screen_manager.update_corner_positions()
 	else:
 		main.screen_manager.apply_curvature()
-	if main.bezel_mesh:
-		main.bezel_mesh.visible = main.bezel_enabled
-	main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
-	main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[clampi(main.curvature, 0, main.curvature_labels.size() - 1)])
-	main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[clampi(main.passthrough_mode, 0, main.passthrough_labels.size() - 1)])
-	main.ui_controller.update_option_btn(main._ui_render_btn, main.smooth_labels[clampi(main.smooth_mode, 0, main.smooth_labels.size() - 1)])
-	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[clampi(main.sharpen_mode, 0, main.sharpen_labels.size() - 1)])
-	main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[clampi(main.cursor_mode, 0, main.cursor_labels.size() - 1)])
-	main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[clampi(main.pointer_steady, 0, main.pointer_steady_labels.size() - 1)])
-	main.ui_controller.update_codec_btn()
-	main.screen_manager.update_bezel_size()
-	main.settings_controller.apply_filter()
 	main.auto_reconnect_enabled = save.get_value("stream", "auto_reconnect", true)
 	main.idle_timeout_min = save.get_value("stream", "idle_timeout_min", 0)
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
-	main.ui_controller.update_option_btn(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
-	var idle_idx = main.settings_controller.idle_values.find(main.idle_timeout_min)
-	if idle_idx < 0: idle_idx = 0
-	main.ui_controller.update_option_btn(main._ui_idle_btn, main.settings_controller.idle_labels[idle_idx])
+
+	sync_ui_to_settings()
