@@ -609,6 +609,10 @@ void StreamConnection::_decode_thread_func() {
 
                 if (h264_hw_upgrade_pending_.load() && !h264_hw_upgraded_.load()) {
                     _try_h264_hw_upgrade();
+                    if (h264_hw_upgraded_.load()) {
+                        av_frame_free(&tmp);
+                        break;
+                    }
                 }
 
                 frames_decoded_.fetch_add(1);
