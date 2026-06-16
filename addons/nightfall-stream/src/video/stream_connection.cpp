@@ -624,16 +624,33 @@ void StreamConnection::_decode_thread_func() {
                     last_frame_latency_us_.store((int)(decode_done_us - submit_us));
                 }
 
-                AVColorSpace frame_cs = _resolve_frame_colorspace(tmp);
-                AVColorRange frame_cr = (AVColorRange)tmp->color_range;
+                AVFrame *final_frame = tmp;
+                AVFrame *sw_frame = nullptr;
+                if (tmp->hw_frames_ctx) {
+                    sw_frame = av_frame_alloc();
+                    int transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+                    if (transfer_ret >= 0) {
+                        av_frame_copy_props(sw_frame, tmp);
+                        final_frame = sw_frame;
+                    } else {
+                        av_frame_free(&sw_frame);
+                        sw_frame = nullptr;
+                    }
+                }
+
+                AVColorSpace frame_cs = _resolve_frame_colorspace(final_frame);
+                AVColorRange frame_cr = (AVColorRange)final_frame->color_range;
                 if (frame_cs != current_colorspace_ || frame_cr != current_color_range_) {
                     current_colorspace_ = frame_cs;
                     current_color_range_ = frame_cr;
                     uploader_->update_colorspace((int)frame_cs, (int)frame_cr);
                 }
 
-                uploader_->update_from_frame(tmp);
+                uploader_->update_from_frame(final_frame);
 
+                if (sw_frame) {
+                    av_frame_free(&sw_frame);
+                }
                 av_frame_free(&tmp);
             }
         }

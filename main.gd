@@ -1310,7 +1310,10 @@ func _ready():
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
-	get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	if OS.get_name() == "Android":
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	else:
+		get_viewport().msaa_3d = Viewport.MSAA_2X
 	_xr_base_render_scale = get_viewport().scaling_3d_scale
 	is_xr_active = true
 	sbs_mode = 0
