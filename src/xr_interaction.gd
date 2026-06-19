@@ -16,6 +16,32 @@ func get_active_raycast() -> RayCast3D:
 		return main.left_hand_raycast
 	return main.hand_raycast
 
+func _get_hand_pinch_strength(tracker_name: String) -> float:
+	var tracker = XRServer.get_tracker(tracker_name)
+	if not tracker:
+		return 0.0
+	var thumb_flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_THUMB_TIP)
+	var index_flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
+	if (thumb_flags & 8) == 0 or (index_flags & 8) == 0:
+		return 0.0
+	var thumb_tip = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_THUMB_TIP).origin
+	var index_tip = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
+	var dist = (index_tip - thumb_tip).length()
+	return clampf(1.0 - (dist - 0.015) / (0.045 - 0.015), 0.0, 1.0)
+
+func _get_hand_grasp_strength(tracker_name: String) -> float:
+	var tracker = XRServer.get_tracker(tracker_name)
+	if not tracker:
+		return 0.0
+	var thumb_flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_THUMB_TIP)
+	var middle_flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_MIDDLE_FINGER_TIP)
+	if (thumb_flags & 8) == 0 or (middle_flags & 8) == 0:
+		return 0.0
+	var thumb_tip = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_THUMB_TIP).origin
+	var middle_tip = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_MIDDLE_FINGER_TIP).origin
+	var dist = (middle_tip - thumb_tip).length()
+	return clampf(1.0 - (dist - 0.015) / (0.045 - 0.015), 0.0, 1.0)
+
 func _update_active_hand():
 	if not main.is_xr_active:
 		return
@@ -31,12 +57,8 @@ func _update_active_hand():
 	if left_tracker and left_tracker is XRHandTracker and left_tracker.get_has_tracking_data():
 		left_has_data = true
 	if right_has_data and left_has_data:
-		var right_pinch = 0.0
-		var left_pinch = 0.0
-		if main.right_hand:
-			right_pinch = main.right_hand.get_float("primary")
-		if main.left_hand:
-			left_pinch = main.left_hand.get_float("primary")
+		var right_pinch = _get_hand_pinch_strength("/user/hand_tracker/right")
+		var left_pinch = _get_hand_pinch_strength("/user/hand_tracker/left")
 		if left_pinch > 0.5 and right_pinch <= 0.5:
 			_active_hand = "left"
 		elif right_pinch > 0.5 and left_pinch <= 0.5:
@@ -49,13 +71,9 @@ func _update_active_hand():
 func _is_now_clicking() -> bool:
 	if not main.is_xr_active:
 		return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	if main.get_is_hand_tracking():
-		var hand = main.left_hand
-		if _active_hand == "right":
-			hand = main.right_hand
-		if hand:
-			return hand.get_float("primary") > 0.85
-		return false
+	if main._is_using_hands:
+		var tracker_name = "/user/hand_tracker/left" if _active_hand == "left" else "/user/hand_tracker/right"
+		return _get_hand_pinch_strength(tracker_name) > 0.85
 	else:
 		if main.right_hand:
 			return main.right_hand.get_float("trigger") > 0.5
@@ -64,6 +82,9 @@ func _is_now_clicking() -> bool:
 func _is_now_gripping() -> bool:
 	if not main.is_xr_active:
 		return false
+	if main._is_using_hands:
+		var tracker_name = "/user/hand_tracker/left" if _active_hand == "left" else "/user/hand_tracker/right"
+		return _get_hand_grasp_strength(tracker_name) > 0.85
 	var hand = main.left_hand
 	if _active_hand == "right":
 		hand = main.right_hand
@@ -135,7 +156,7 @@ func handle_pointer_interaction():
 	if main.left_hand_raycast:
 		left_laser = main.left_hand_raycast.get_node_or_null("Laser")
 	if main.is_xr_active:
-		if main.get_is_hand_tracking():
+		if main._is_using_hands:
 			var has_data = main.get_hand_tracking_has_data()
 			if _active_hand == "left":
 				if right_laser:
