@@ -36,12 +36,13 @@ ui_cancel={
 
 [rendering]
 
-viewport/hdr_3d=false
 textures/vram_compression/import_etc2_astc=true
+viewport/hdr_3d=false
 
 [xr]
 
 openxr/enabled=true
 openxr/environment_blend_mode=2
+openxr/extensions/hand_tracking=true
 shaders/enabled=true
 openxr/extensions/meta/passthrough=true

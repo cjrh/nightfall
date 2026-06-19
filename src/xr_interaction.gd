@@ -4,24 +4,89 @@ extends RefCounted
 var main: Node3D
 var pointer_on_ui: bool = false
 
+var _active_hand: String = "right"
+
 func _init(owner: Node3D):
 	main = owner
 
+func get_active_raycast() -> RayCast3D:
+	if not main.is_xr_active:
+		return main.mouse_raycast
+	if _active_hand == "left" and main.left_hand_raycast:
+		return main.left_hand_raycast
+	return main.hand_raycast
+
+func _update_active_hand():
+	if not main.is_xr_active:
+		return
+	if not main.get_is_hand_tracking():
+		_active_hand = "right"
+		return
+	var right_has_data = false
+	var left_has_data = false
+	var right_tracker = XRServer.get_tracker("/user/hand_tracker/right")
+	var left_tracker = XRServer.get_tracker("/user/hand_tracker/left")
+	if right_tracker and right_tracker is XRHandTracker and right_tracker.get_has_tracking_data():
+		right_has_data = true
+	if left_tracker and left_tracker is XRHandTracker and left_tracker.get_has_tracking_data():
+		left_has_data = true
+	if right_has_data and left_has_data:
+		var right_pinch = 0.0
+		var left_pinch = 0.0
+		if main.right_hand:
+			right_pinch = main.right_hand.get_float("primary")
+		if main.left_hand:
+			left_pinch = main.left_hand.get_float("primary")
+		if left_pinch > 0.5 and right_pinch <= 0.5:
+			_active_hand = "left"
+		elif right_pinch > 0.5 and left_pinch <= 0.5:
+			_active_hand = "right"
+	elif left_has_data and not right_has_data:
+		_active_hand = "left"
+	elif right_has_data:
+		_active_hand = "right"
+
+func _is_now_clicking() -> bool:
+	if not main.is_xr_active:
+		return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if main.get_is_hand_tracking():
+		var hand = main.left_hand
+		if _active_hand == "right":
+			hand = main.right_hand
+		if hand:
+			return hand.get_float("primary") > 0.85
+		return false
+	else:
+		if main.right_hand:
+			return main.right_hand.get_float("trigger") > 0.5
+		return false
+
+func _is_now_gripping() -> bool:
+	if not main.is_xr_active:
+		return false
+	var hand = main.left_hand
+	if _active_hand == "right":
+		hand = main.right_hand
+	if not hand:
+		return false
+	if hand.is_button_pressed("grip_click"):
+		return true
+	if hand.is_button_pressed("grip"):
+		return true
+	if hand.get_float("grip") > 0.2:
+		return true
+	return false
+
 func handle_pointer_interaction():
-	var active_raycast = main.hand_raycast if main.is_xr_active else main.mouse_raycast
+	_update_active_hand()
+	var active_raycast = get_active_raycast()
 	pointer_on_ui = false
 
 	if main.is_xr_active and main.is_streaming and main.controller_mapper:
 		main.controller_mapper.check_toggle()
 
 	if main.is_xr_active and main.is_streaming:
-		var is_gripping = false
-		if main.right_hand:
-			is_gripping = main.right_hand.is_button_pressed("grip_click")
-			if not is_gripping:
-				is_gripping = main.right_hand.is_button_pressed("grip")
-			if not is_gripping:
-				is_gripping = main.right_hand.get_float("grip") > 0.2
+		var is_gripping = _is_now_gripping()
 		var pad_blocking = main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
 		var tp_blocking = main.virtual_keyboard and main.virtual_keyboard.trackpad_active
 		if not pad_blocking and not tp_blocking and is_gripping and not main.was_right_clicking and main.right_click_cooldown <= 0.0:
@@ -65,8 +130,33 @@ func handle_pointer_interaction():
 	elif main.grabbed_corner_idx >= 0:
 		_set_corner_color(main.corner_handles[main.grabbed_corner_idx], Color.WHITE, 0.3)
 
-	var laser = main.get_node("%Laser")
-	laser.visible = main.is_xr_active
+	var right_laser = main.get_node("%Laser")
+	var left_laser = null
+	if main.left_hand_raycast:
+		left_laser = main.left_hand_raycast.get_node_or_null("Laser")
+	if main.is_xr_active:
+		if main.get_is_hand_tracking():
+			var has_data = main.get_hand_tracking_has_data()
+			if _active_hand == "left":
+				if right_laser:
+					right_laser.visible = false
+				if left_laser:
+					left_laser.visible = has_data
+			else:
+				if right_laser:
+					right_laser.visible = has_data
+				if left_laser:
+					left_laser.visible = false
+		else:
+			if right_laser:
+				right_laser.visible = true
+			if left_laser:
+				left_laser.visible = false
+	else:
+		if right_laser:
+			right_laser.visible = false
+		if left_laser:
+			left_laser.visible = false
 	var on_screen = false
 	var tp_capturing = main.virtual_keyboard and main.virtual_keyboard.trackpad_active
 	var pad_mode_active = main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
@@ -77,7 +167,9 @@ func handle_pointer_interaction():
 			main.pointer_cursor.visible = false
 		if main.comp_cursor:
 			main.comp_cursor.visible = false
-		laser.visible = false
+		right_laser.visible = false
+		if left_laser:
+			left_laser.visible = false
 	if not tp_capturing and active_raycast.is_colliding():
 		var hit_point = main._get_steady_hit(active_raycast.get_collision_point())
 		var _col = active_raycast.get_collider()
@@ -123,7 +215,7 @@ func handle_pointer_interaction():
 		if parent == main.get_node("%ScreenGrabBar") and parent != main.grabbed_bar:
 			_set_grab_bar_color(parent, Color.WHITE, 0.1)
 
-		var is_now_clicking = main.right_hand.get_float("trigger") > 0.5 if main.is_xr_active else Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		var is_now_clicking = _is_now_clicking()
 
 		var hit_ui = false
 		if main.ui_visible and main.ui_panel_3d and main.ui_panel_3d.visible:
@@ -318,7 +410,7 @@ func handle_pointer_interaction():
 func handle_grab():
 	if not main.grabbed_node:
 		return
-	var active_raycast = main.hand_raycast if main.is_xr_active else main.mouse_raycast
+	var active_raycast = get_active_raycast()
 	var hand_pos = active_raycast.global_position
 	var hand_delta = hand_pos - main.grab_start_hand_pos
 	var depth = hand_delta.dot(main.grab_forward) * main.grab_forward
@@ -352,7 +444,7 @@ func handle_grab():
 		if main.comp_cylinder_left and main.comp_cylinder_left.visible:
 			main._update_cylinder_params()
 
-	var still_clicking = main.right_hand.get_float("trigger") > 0.5 if main.is_xr_active else Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var still_clicking = _is_now_clicking()
 	if not still_clicking:
 		if main.grabbed_bar:
 			_set_grab_bar_color(main.grabbed_bar, Color.WHITE, 0.01)
@@ -370,7 +462,7 @@ func handle_grab():
 func handle_corner_resize():
 	if main.grabbed_corner_idx < 0:
 		return
-	var active_raycast = main.hand_raycast if main.is_xr_active else main.mouse_raycast
+	var active_raycast = get_active_raycast()
 	var ray_origin = active_raycast.global_position
 	var ray_dir = -active_raycast.global_transform.basis.z
 
@@ -432,7 +524,7 @@ func handle_corner_resize():
 	main.screen_manager.update_bezel_size()
 	main._update_comp_layer_size()
 
-	var still_clicking = main.right_hand.get_float("trigger") > 0.5 if main.is_xr_active else Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var still_clicking = _is_now_clicking()
 	if not still_clicking:
 		var handle = main.corner_handles[main.grabbed_corner_idx]
 		_set_corner_color(handle, Color.WHITE, 0.01)

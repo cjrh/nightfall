@@ -23,6 +23,7 @@ func save_state():
 	save.set_value("controller", "btn_toggle", main.controller_mapper.btn_toggle)
 	save.set_value("stream", "auto_reconnect", main.auto_reconnect_enabled)
 	save.set_value("stream", "idle_timeout_min", main.idle_timeout_min)
+	save.set_value("local_capture", "restore_token", main.pipewire_restore_token)
 	save.save("user://app_state.cfg")
 	save_host_state()
 
@@ -121,10 +122,8 @@ func load_state():
 	main.sharpen_mode = save.get_value("screen", "sharpen_mode", 0)
 	main.cursor_mode = save.get_value("screen", "cursor_mode", 1)
 	var saved_steady = save.get_value("screen", "pointer_steady", 1)
-	if saved_steady == true:
-		main.pointer_steady = 1
-	elif saved_steady == false:
-		main.pointer_steady = 0
+	if saved_steady is bool:
+		main.pointer_steady = 1 if saved_steady else 0
 	else:
 		main.pointer_steady = int(saved_steady)
 	main.codec_preference = save.get_value("screen", "codec_preference", 1)
@@ -156,6 +155,7 @@ func load_state():
 		main.screen_manager.apply_curvature()
 	main.auto_reconnect_enabled = save.get_value("stream", "auto_reconnect", true)
 	main.idle_timeout_min = save.get_value("stream", "idle_timeout_min", 0)
+	main.pipewire_restore_token = save.get_value("local_capture", "restore_token", "")
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
 

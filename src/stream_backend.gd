@@ -70,6 +70,10 @@ func start_stream_v2(host: String, server_info: Dictionary, stream_config: Dicti
 	if _v2:
 		_v2.start_stream(host, server_info, stream_config, disable_hw)
 
+func set_local_capture_mode(enabled: bool):
+	if _v2 and _v2.has_method("set_local_capture_mode"):
+		_v2.set_local_capture_mode(enabled)
+
 func stop_play_stream():
 	if _v2:
 		_v2.stop_stream()

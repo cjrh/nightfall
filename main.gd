@@ -17,6 +17,21 @@ func _get_mdns():
 	if not mdns and ClassDB.class_exists("MdnsBrowser"):
 		mdns = ClassDB.instantiate("MdnsBrowser")
 	return mdns
+
+func get_is_hand_tracking() -> bool:
+	for tracker_name in ["/user/hand_tracker/right", "/user/hand_tracker/left"]:
+		var tracker = XRServer.get_tracker(tracker_name)
+		if tracker and tracker is XRHandTracker:
+			return true
+	return false
+
+func get_hand_tracking_has_data() -> bool:
+	for tracker_name in ["/user/hand_tracker/right", "/user/hand_tracker/left"]:
+		var tracker = XRServer.get_tracker(tracker_name)
+		if tracker and tracker is XRHandTracker:
+			if tracker.get_has_tracking_data():
+				return true
+	return false
 @onready var xr_origin = $XROrigin3D
 @onready var xr_camera = $XROrigin3D/XRCamera3D
 @onready var mouse_raycast = %RayCast3D
@@ -48,6 +63,10 @@ var _was_b_pressed: bool = false
 var _was_a_pressed: bool = false
 var _was_r_stick_click: bool = false
 var _startup_reposition: bool = true
+var _is_using_hands: bool = false
+var right_hand_visual: Node3D = null
+var left_hand_visual: Node3D = null
+var left_hand_raycast: RayCast3D = null
 var mouse_captured_by_stream: bool = false
 var suppress_input_frames: int = 0
 var auto_detect_enabled: bool = false
@@ -56,6 +75,7 @@ var auto_detect_running: bool = false
 var detection_history: Array = []
 var mouse_sensitivity: float = 0.002
 var grabbed_node: Node3D = null
+var pipewire_restore_token: String = ""
 var grab_distance: float = 0.0
 var grab_offset: Vector3 = Vector3.ZERO
 var grabbed_bar: MeshInstance3D = null
@@ -83,7 +103,7 @@ var sharpen_mode: int = 0
 var smooth_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
 var sharpen_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
 var _xr_base_render_scale: float = 1.0
-var _xr_render_width: int = 1680
+var _xr_render_width: int = 2064
 var _mesh_size: Vector2 = Vector2(3.2, 1.8)
 var stream_fps: int = 60
 var _cached_filter_mode: int = -1
@@ -769,7 +789,7 @@ func _update_cursor_layer():
 			comp_cursor.visible = false
 		_hide_all_stream_cursors()
 		return
-	var active_raycast = hand_raycast if is_xr_active else mouse_raycast
+	var active_raycast = xr_interaction.get_active_raycast() if xr_interaction else (hand_raycast if is_xr_active else mouse_raycast)
 	var on_screen = false
 	var pad_on_screen = controller_mapper and controller_mapper.is_active() and controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
 	var tp_capturing = virtual_keyboard and virtual_keyboard.visible and virtual_keyboard.trackpad_active
@@ -1212,6 +1232,16 @@ func _ready():
 	if OS.get_name() == "Android":
 		_load_controller_models()
 
+	if right_hand and left_hand:
+		var right_ray = right_hand.get_node_or_null("HandRayCast")
+		if right_ray:
+			left_hand_raycast = right_ray.duplicate()
+			left_hand_raycast.name = "LeftHandRayCast"
+			left_hand.add_child(left_hand_raycast)
+	
+	right_hand_visual = _create_hand_visualizer(false)
+	left_hand_visual = _create_hand_visualizer(true)
+
 	ui_controller.build_ui()
 	welcome_screen.build_welcome_ui()
 
@@ -1246,6 +1276,12 @@ func _ready():
 	v2_node.stream_terminated.connect(func(err_code, err_msg):
 		_on_stream_terminated(err_msg, err_code)
 	)
+	if v2_node.has_signal("restore_token_updated"):
+		v2_node.restore_token_updated.connect(func(tok):
+			_log("[PORTAL] Storing new restore token: " + tok)
+			pipewire_restore_token = tok
+			state_manager.save_state()
+		)
 	if v2_node.has_signal("reconnect_scheduled"):
 		v2_node.reconnect_scheduled.connect(func(attempt, max_attempts, delay_ms):
 			_reconnecting = true
@@ -1281,6 +1317,12 @@ func _ready():
 		_log("[XR] OpenXR not available - cannot run without VR runtime")
 		if not Engine.is_editor_hint():
 			get_tree().quit()
+		return
+
+	if Engine.is_editor_hint():
+		get_viewport().use_xr = false
+		if interface:
+			interface.uninitialize()
 		return
 
 	var render_size = interface.get_render_target_size()
@@ -1414,6 +1456,37 @@ func _on_joy_changed(device: int, connected: bool):
 	pass
 
 func _process(delta):
+	if is_xr_active:
+		var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
+		if hands_active != _is_using_hands:
+			_is_using_hands = hands_active
+			if _is_using_hands:
+				_log("[INPUT] Hand Tracking active, hiding controller models")
+				_set_controller_models_visible(false)
+			else:
+				_log("[INPUT] Controllers active, showing controller models")
+				_set_controller_models_visible(true)
+		
+		if _is_using_hands:
+			var right_tracker = XRServer.get_tracker("/user/hand_tracker/right")
+			var left_tracker = XRServer.get_tracker("/user/hand_tracker/left")
+			if right_tracker:
+				_update_hand_tracker_transform(right_hand, right_tracker)
+				_update_hand_visualizer(right_hand_visual, right_tracker)
+			if left_tracker:
+				_update_hand_tracker_transform(left_hand, left_tracker)
+				_update_hand_visualizer(left_hand_visual, left_tracker)
+		else:
+			if right_hand_visual: right_hand_visual.visible = false
+			if left_hand_visual: left_hand_visual.visible = false
+		if Engine.get_frames_drawn() % 90 == 0:
+			_log("[INPUT-DEBUG] HandsActive: %s, RightHand tracker: %s, pos: %s, rot: %s" % [
+				str(_is_using_hands),
+				str(right_hand.tracker),
+				str(right_hand.global_position),
+				str(right_hand.global_rotation)
+			])
+
 	if Engine.get_frames_drawn() % 120 == 0:
 		_flush_log()
 
@@ -1461,13 +1534,15 @@ func _process(delta):
 	if is_streaming and idle_timeout_min > 0:
 		if right_hand:
 			var trigger = right_hand.get_float("trigger")
+			var primary = right_hand.get_float("primary")
 			var grip = right_hand.get_float("grip")
-			if trigger > 0.1 or grip > 0.1:
+			if trigger > 0.1 or primary > 0.1 or grip > 0.1:
 				_last_activity_time = Time.get_ticks_msec() / 1000.0
 		if left_hand:
 			var l_trigger = left_hand.get_float("trigger")
+			var l_primary = left_hand.get_float("primary")
 			var l_grip = left_hand.get_float("grip")
-			if l_trigger > 0.1 or l_grip > 0.1:
+			if l_trigger > 0.1 or l_primary > 0.1 or l_grip > 0.1:
 				_last_activity_time = Time.get_ticks_msec() / 1000.0
 
 	if is_xr_active:
@@ -1645,6 +1720,13 @@ func _load_controller_models():
 		right_model.scale = Vector3(1.0, 1.0, 1.0)
 		right_model.rotation = Vector3(0, PI, 0)
 		_apply_controller_textures(right_model, false)
+
+func _set_controller_models_visible(visible_state: bool):
+	for hand in [right_hand, left_hand]:
+		if hand:
+			for child in hand.get_children():
+				if child is Node3D and child.name != "HandRayCast" and child.name != "LeftHandRayCast":
+					child.visible = visible_state
 
 func _apply_controller_textures(node: Node, is_left: bool):
 	var base_color_path = "res://models/controllers/textures/MetaQuestTouchPlus_Left_BaseColor.png" if is_left else "res://models/controllers/textures/MetaQuestTouchPlus_right_BaseColor.png"
@@ -1856,3 +1938,100 @@ func _create_data():
 	particles.sorting_offset = -100.0
 	particles.position = xr_camera.global_position + Vector3(0, -3, 0)
 	add_child(particles)
+
+func _create_hand_visualizer(is_left: bool) -> Node3D:
+	var hand_vis = Node3D.new()
+	hand_vis.name = "LeftHandVisual" if is_left else "RightHandVisual"
+	
+	var mat = StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.3, 0.7, 1.0, 0.3) # soft semi-transparent blue
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	
+	var palm_mesh = MeshInstance3D.new()
+	palm_mesh.name = "Palm"
+	var sphere = SphereMesh.new()
+	sphere.radius = 0.04
+	sphere.height = 0.06
+	palm_mesh.mesh = sphere
+	palm_mesh.material_override = mat
+	hand_vis.add_child(palm_mesh)
+	
+	var index_mesh = MeshInstance3D.new()
+	index_mesh.name = "Index"
+	var cap = CylinderMesh.new()
+	cap.top_radius = 0.008
+	cap.bottom_radius = 0.008
+	cap.height = 1.0 # scaled dynamically
+	index_mesh.mesh = cap
+	index_mesh.material_override = mat
+	hand_vis.add_child(index_mesh)
+	
+	hand_vis.visible = false
+	xr_origin.add_child(hand_vis)
+	return hand_vis
+
+func _update_hand_visualizer(hand_vis: Node3D, tracker: XRHandTracker):
+	if not hand_vis or not tracker:
+		return
+		
+	var palm_has = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM) & 8) != 0
+	var knuckle_has = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_METACARPAL) & 8) != 0
+	var tip_has = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP) & 8) != 0
+	
+	if not palm_has and not knuckle_has:
+		hand_vis.visible = false
+		return
+		
+	hand_vis.visible = true
+	
+	var palm_mesh = hand_vis.get_node("Palm")
+	if palm_has:
+		palm_mesh.transform = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
+		palm_mesh.visible = true
+	else:
+		palm_mesh.visible = false
+		
+	var index_mesh = hand_vis.get_node("Index")
+	if knuckle_has and tip_has:
+		var knuckle_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_METACARPAL).origin
+		var tip_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
+		
+		var delta = tip_pos - knuckle_pos
+		var dist = delta.length()
+		if dist > 0.001:
+			var center = knuckle_pos + delta * 0.5
+			var dir = delta.normalized()
+			
+			var up = dir
+			var right = dir.cross(Vector3.UP).normalized()
+			if right.length_squared() < 0.01:
+				right = dir.cross(Vector3.FORWARD).normalized()
+			var fwd = right.cross(up).normalized()
+			
+			var basis = Basis(right, up, fwd)
+			index_mesh.transform = Transform3D(basis, center)
+			index_mesh.scale = Vector3(1, dist, 1) # scale height
+			index_mesh.visible = true
+		else:
+			index_mesh.visible = false
+	else:
+		index_mesh.visible = false
+
+func _update_hand_tracker_transform(hand_node: XRController3D, tracker: XRHandTracker):
+	var palm_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM) & 8) != 0
+	var knuckle_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_METACARPAL) & 8) != 0
+	var tip_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP) & 8) != 0
+	
+	if knuckle_ok and tip_ok:
+		var knuckle_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_METACARPAL).origin
+		var tip_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
+		var forward = (tip_pos - knuckle_pos).normalized()
+		var palm_basis = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).basis
+		var temp_up = palm_basis.y
+		var right = forward.cross(temp_up).normalized()
+		var up = right.cross(forward).normalized()
+		var basis = Basis(right, up, -forward)
+		hand_node.transform = Transform3D(basis, knuckle_pos)
+	elif palm_ok:
+		hand_node.transform = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
