@@ -2019,19 +2019,27 @@ func _update_hand_visualizer(hand_vis: Node3D, tracker: XRHandTracker):
 		index_mesh.visible = false
 
 func _update_hand_tracker_transform(hand_node: XRController3D, tracker: XRHandTracker):
-	var palm_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM) & 8) != 0
-	var knuckle_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_METACARPAL) & 8) != 0
-	var tip_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP) & 8) != 0
+	var wrist_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_WRIST) & 8) != 0
+	var middle_knuckle_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_MIDDLE_FINGER_METACARPAL) & 8) != 0
 	
-	if knuckle_ok and tip_ok:
-		var knuckle_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_METACARPAL).origin
-		var tip_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
-		var forward = (tip_pos - knuckle_pos).normalized()
-		var palm_basis = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).basis
-		var temp_up = palm_basis.y
+	if wrist_ok and middle_knuckle_ok:
+		var wrist_trans = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST)
+		var middle_knuckle_pos = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_MIDDLE_FINGER_METACARPAL).origin
+		var wrist_pos = wrist_trans.origin
+		
+		var forward = (middle_knuckle_pos - wrist_pos).normalized()
+		var temp_up = wrist_trans.basis.y
 		var right = forward.cross(temp_up).normalized()
 		var up = right.cross(forward).normalized()
 		var basis = Basis(right, up, -forward)
-		hand_node.transform = Transform3D(basis, knuckle_pos)
-	elif palm_ok:
-		hand_node.transform = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
+		hand_node.transform = Transform3D(basis, middle_knuckle_pos)
+	elif wrist_ok:
+		var t = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST)
+		t.basis = t.basis.rotated(t.basis.y, PI)
+		hand_node.transform = t
+	else:
+		var palm_ok = (tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM) & 8) != 0
+		if palm_ok:
+			var t = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
+			t.basis = t.basis.rotated(t.basis.y, PI)
+			hand_node.transform = t
