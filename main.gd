@@ -2032,6 +2032,8 @@ func _update_hand_tracker_transform(hand_node: XRController3D, tracker: XRHandTr
 		var right = forward.cross(temp_up).normalized()
 		var up = right.cross(forward).normalized()
 		var basis = Basis(right, up, -forward)
+		# Pitch down by 30 degrees for relaxed remote-like aiming
+		basis = basis.rotated(right, deg_to_rad(-30))
 		hand_node.transform = Transform3D(basis, middle_knuckle_pos)
 	elif wrist_ok:
 		var t = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST)
