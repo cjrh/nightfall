@@ -75,8 +75,7 @@ Vector<String> FfmpegDecoder::get_candidate_decoders(int codec_family) {
     if (!base_codec_name.is_empty()) {
         candidates.push_back(base_codec_name + "_mediacodec");
     }
-#endif
-
+#else
     if (codec_family == CODEC_FAMILY_H264) {
         candidates.push_back("h264_mediacodec");
         candidates.push_back("h264");
@@ -86,6 +85,7 @@ Vector<String> FfmpegDecoder::get_candidate_decoders(int codec_family) {
         candidates.push_back("libdav1d");
         candidates.push_back("av1");
     }
+#endif
     return candidates;
 }
 
