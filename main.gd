@@ -19,6 +19,8 @@ func _get_mdns():
 	return mdns
 
 func get_is_hand_tracking() -> bool:
+	if not hand_tracking_enabled:
+		return false
 	for tracker_name in ["/user/hand_tracker/right", "/user/hand_tracker/left"]:
 		var tracker = XRServer.get_tracker(tracker_name)
 		if tracker and tracker is XRHandTracker:
@@ -26,6 +28,8 @@ func get_is_hand_tracking() -> bool:
 	return false
 
 func get_hand_tracking_has_data() -> bool:
+	if not hand_tracking_enabled:
+		return false
 	for tracker_name in ["/user/hand_tracker/right", "/user/hand_tracker/left"]:
 		var tracker = XRServer.get_tracker(tracker_name)
 		if tracker and tracker is XRHandTracker:
@@ -64,6 +68,7 @@ var _was_a_pressed: bool = false
 var _was_r_stick_click: bool = false
 var _startup_reposition: bool = true
 var _is_using_hands: bool = false
+var hand_tracking_enabled: bool = true
 var right_hand_visual: Node3D = null
 var left_hand_visual: Node3D = null
 var left_hand_raycast: RayCast3D = null
@@ -193,6 +198,7 @@ var _ui_status_label: Label
 var _ui_pt_btn: Button
 var _ui_curve_btn: Button
 var _ui_bezel_btn: Button
+var _ui_hand_tracking_btn: Button
 var _ui_sbs_btn: Button
 var _ui_3d_btn: Button
 var _ui_res_btn: Button

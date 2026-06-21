@@ -426,6 +426,8 @@ func build_ui():
 	control_row1.add_child(main._ui_steady_btn)
 	main._ui_bezel_btn = make_option_btn("Bezel", "On")
 	control_row1.add_child(main._ui_bezel_btn)
+	main._ui_hand_tracking_btn = make_option_btn("Hand Tracking", "On")
+	control_row1.add_child(main._ui_hand_tracking_btn)
 
 	var control_gap1 = Control.new()
 	control_gap1.custom_minimum_size = Vector2(0, 10)
@@ -503,6 +505,7 @@ func build_ui():
 	main._ui_pt_btn.button_down.connect(func(): main.settings_controller.toggle_passthrough())
 	main._ui_curve_btn.button_down.connect(func(): main.screen_manager.cycle_curvature())
 	main._ui_bezel_btn.button_down.connect(func(): main.screen_manager.toggle_bezel())
+	main._ui_hand_tracking_btn.button_down.connect(func(): main.settings_controller.toggle_hand_tracking())
 	main._ui_sbs_btn.button_down.connect(func(): on_sbs_toggled())
 	main._ui_3d_btn.button_down.connect(func(): on_ai_3d_toggled())
 	main._ui_res_btn.button_down.connect(func(): main.settings_controller.cycle_resolution())
