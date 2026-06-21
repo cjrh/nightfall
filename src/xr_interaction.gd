@@ -5,6 +5,9 @@ var main: Node3D
 var pointer_on_ui: bool = false
 
 var _active_hand: String = "right"
+var _pinch_start_time: float = 0.0
+var _pinch_start_pos: Vector2 = Vector2.ZERO
+var _click_pending_release: bool = false
 
 func _init(owner: Node3D):
 	main = owner
@@ -32,6 +35,9 @@ func _get_hand_pinch_strength(tracker_name: String) -> float:
 func _get_hand_grasp_strength(tracker_name: String) -> float:
 	var tracker = XRServer.get_tracker(tracker_name)
 	if not tracker:
+		return 0.0
+	# Prevent right-click if left-click is fully active
+	if _get_hand_pinch_strength(tracker_name) > 0.85:
 		return 0.0
 	var thumb_flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_THUMB_TIP)
 	var middle_flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_MIDDLE_FINGER_TIP)
@@ -102,6 +108,19 @@ func handle_pointer_interaction():
 	_update_active_hand()
 	var active_raycast = get_active_raycast()
 	pointer_on_ui = false
+
+	var is_now_clicking = _is_now_clicking()
+	if is_now_clicking and not main.was_clicking and not _click_pending_release:
+		_pinch_start_time = Time.get_ticks_msec()
+		if active_raycast.is_colliding() and active_raycast.get_collider().get_parent() == main.screen_mesh:
+			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
+			var uv = main._hit_point_to_uv(hit_pos)
+			var uv_x = uv.x
+			if main.settings_controller.get_stereo_mode() >= 3:
+				var shift = _compute_parallax_shift(uv_x)
+				uv_x = clampf(uv_x + shift + 0.0075, 0.0, 1.0)
+			_pinch_start_pos = Vector2(uv_x * main.stream_viewport.size.x, uv.y * main.stream_viewport.size.y)
+			_click_pending_release = true
 
 	if main.is_xr_active and main.is_streaming and main.controller_mapper:
 		main.controller_mapper.check_toggle()
@@ -236,7 +255,7 @@ func handle_pointer_interaction():
 		if parent == main.get_node("%ScreenGrabBar") and parent != main.grabbed_bar:
 			_set_grab_bar_color(parent, Color.WHITE, 0.1)
 
-		var is_now_clicking = _is_now_clicking()
+		is_now_clicking = _is_now_clicking()
 
 		var hit_ui = false
 		if main.ui_visible and main.ui_panel_3d and main.ui_panel_3d.visible:
@@ -377,13 +396,22 @@ func handle_pointer_interaction():
 
 			if main.is_xr_active:
 				if is_now_clicking:
-					main.stream_backend.send_mouse_position_event(host_x, host_y, main.stream_viewport.size.x, main.stream_viewport.size.y)
-					if is_now_clicking and not main.was_clicking:
-						main.stream_backend.send_mouse_button_event(7, 1)
-						main.was_clicking = true
+					var hold_time = Time.get_ticks_msec() - _pinch_start_time
+					var dist = (Vector2(host_x, host_y) - _pinch_start_pos).length()
+					if hold_time > 150 or dist > 15:
+						main.stream_backend.send_mouse_position_event(host_x, host_y, main.stream_viewport.size.x, main.stream_viewport.size.y)
+						if not main.was_clicking:
+							main.stream_backend.send_mouse_button_event(7, 1)
+							main.was_clicking = true
 				elif main.was_clicking:
 					main.stream_backend.send_mouse_button_event(8, 1)
 					main.was_clicking = false
+					_click_pending_release = false
+				elif _click_pending_release:
+					main.stream_backend.send_mouse_position_event(int(_pinch_start_pos.x), int(_pinch_start_pos.y), main.stream_viewport.size.x, main.stream_viewport.size.y)
+					main.stream_backend.send_mouse_button_event(7, 1)
+					main.stream_backend.send_mouse_button_event(8, 1)
+					_click_pending_release = false
 			else:
 				if is_now_clicking and not main.was_clicking:
 					main.stream_backend.send_mouse_position_event(host_x, host_y, main.stream_viewport.size.x, main.stream_viewport.size.y)
@@ -427,6 +455,7 @@ func handle_pointer_interaction():
 		if main.is_streaming:
 			main.stream_backend.send_mouse_button_event(8, 1)
 		main.was_clicking = false
+		_click_pending_release = false
 
 func handle_grab():
 	if not main.grabbed_node:

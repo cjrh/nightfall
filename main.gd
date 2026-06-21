@@ -1239,6 +1239,9 @@ func _ready():
 			left_hand_raycast.name = "LeftHandRayCast"
 			left_hand.add_child(left_hand_raycast)
 	
+	if has_node("%Laser"):
+		get_node("%Laser").material_override.render_priority = 100
+	
 	right_hand_visual = _create_hand_visualizer(false)
 	left_hand_visual = _create_hand_visualizer(true)
 
@@ -1444,6 +1447,11 @@ func _ready():
 	Input.joy_connection_changed.connect(func(device, connected):
 		_on_joy_changed(device, connected)
 	)
+
+	if right_hand:
+		right_hand.pose = "aim"
+	if left_hand:
+		left_hand.pose = "aim"
 
 	_post_ready_check.call_deferred()
 
@@ -1947,6 +1955,8 @@ func _create_hand_visualizer(is_left: bool) -> Node3D:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(0.3, 0.7, 1.0, 0.3) # soft semi-transparent blue
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.no_depth_test = true
+	mat.render_priority = 100
 	
 	var palm_mesh = MeshInstance3D.new()
 	palm_mesh.name = "Palm"
