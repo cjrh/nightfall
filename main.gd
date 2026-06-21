@@ -68,7 +68,7 @@ var _was_a_pressed: bool = false
 var _was_r_stick_click: bool = false
 var _startup_reposition: bool = true
 var _is_using_hands: bool = false
-var hand_tracking_enabled: bool = true
+var hand_tracking_enabled: bool = false
 var right_hand_visual: Node3D = null
 var left_hand_visual: Node3D = null
 var left_hand_raycast: RayCast3D = null
@@ -191,8 +191,8 @@ var _ui_saved_mat: Material = null
 var _kb_saved_mat: Material = null
 
 var _log_lines: PackedStringArray = []
-var _ui_viewport_size := Vector2i(460, 290)
-var _ui_mesh_size := Vector2(0.92, 0.58)
+var _ui_viewport_size := Vector2i(520, 290)
+var _ui_mesh_size := Vector2(1.04, 0.58)
 var _ui_host_label: Label
 var _ui_status_label: Label
 var _ui_pt_btn: Button
