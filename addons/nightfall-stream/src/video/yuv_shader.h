@@ -15,6 +15,12 @@ uniform int color_range;
 uniform bool swap_uv;
 
 void fragment() {
+	if (color_matrix_type == 3) {
+		vec4 bgra = texture(tex_y, UV);
+		COLOR = vec4(bgra.b, bgra.g, bgra.r, 1.0);
+		return;
+	}
+
 	float y_raw = texture(tex_y, UV).r;
 	float u_raw = 0.5;
 	float v_raw = 0.5;

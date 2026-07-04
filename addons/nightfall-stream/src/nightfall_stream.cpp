@@ -2,7 +2,10 @@
 #include "video/stream_connection.h"
 #include "video/ffmpeg_decoder.h"
 #include "video/texture_uploader.h"
+#include "video/pipewire_capture.h"
+#include "video/dmabuf_importer.h"
 #include "audio/audio_renderer.h"
+#include "audio/pipewire_audio.h"
 #include "input/input_bridge.h"
 #include "config/computer_manager.h"
 #include "config/config_manager.h"
@@ -52,6 +55,21 @@ void NightfallStream::_ready() {
 }
 
 void NightfallStream::_process(double /*delta*/) {
+    if (pipewire_capture_ && dmabuf_importer_ && pipewire_capture_->has_new_frame()) {
+        PipeWireCapture::FrameData frame;
+        if (pipewire_capture_->get_latest_frame(frame)) {
+            dmabuf_importer_->import_frame(frame);
+            pipewire_capture_->release_frame(frame.spa_buf_ptr);
+        }
+    }
+}
+
+void NightfallStream::set_restore_token(const String &token) {
+    restore_token_ = token;
+}
+
+String NightfallStream::get_restore_token() const {
+    return restore_token_;
 }
 
 String NightfallStream::get_version() const {
@@ -64,7 +82,7 @@ int NightfallStream::get_state() const {
 
 void NightfallStream::start_stream(const String &host, const Dictionary &server_info, const Dictionary &stream_config, bool disable_hw) {
     NF_LOG("NightfallStream", "start_stream: host=%s server_info_keys=%d stream_config_keys=%d state=%d stream_conn=%p",
-        host.utf8().get_data(), server_info.size(), stream_config.size(), (int)state_, (void*)stream_connection_);
+        host.utf8().get_data(), (int)server_info.size(), (int)stream_config.size(), (int)state_, (void*)stream_connection_);
     if (state_ == STATE_CONNECTING || state_ == STATE_CONNECTED) {
         stop_stream();
     }
@@ -78,11 +96,42 @@ void NightfallStream::start_stream(const String &host, const Dictionary &server_
     _reset_reconnect();
     emit_signal("state_changed", (int)state_);
 
+    stream_connection_->set_local_capture_mode(local_capture_mode_);
     stream_connection_->start(host, server_info, stream_config, disable_hw);
+
+    if (local_capture_mode_) {
+        NF_LOG("NightfallStream", "Starting PipeWire capture for local mode");
+        pipewire_capture_ = new PipeWireCapture();
+        dmabuf_importer_ = new DmaBufImporter(get_texture_uploader());
+        pipewire_capture_->start(restore_token_.utf8().get_data());
+
+        pipewire_audio_ = new PipeWireAudio(get_audio_renderer().ptr());
+        pipewire_audio_->start();
+    }
 }
 
 void NightfallStream::stop_stream() {
     if (state_ == STATE_IDLE) return;
+
+    if (pipewire_audio_) {
+        pipewire_audio_->stop();
+        delete pipewire_audio_;
+        pipewire_audio_ = nullptr;
+    }
+    if (pipewire_capture_) {
+        pipewire_capture_->stop();
+        std::string tok = pipewire_capture_->get_restore_token();
+        if (!tok.empty()) {
+            restore_token_ = String(tok.c_str());
+            emit_signal("restore_token_updated", restore_token_);
+        }
+        delete pipewire_capture_;
+        pipewire_capture_ = nullptr;
+    }
+    if (dmabuf_importer_) {
+        delete dmabuf_importer_;
+        dmabuf_importer_ = nullptr;
+    }
 
     StreamState prev_state = state_;
     state_ = STATE_STOPPING;
@@ -142,6 +191,14 @@ void NightfallStream::set_reconnect_delay_ms(int ms) {
 
 int NightfallStream::get_reconnect_delay_ms() const {
     return reconnect_delay_ms_;
+}
+
+void NightfallStream::set_local_capture_mode(bool enabled) {
+    local_capture_mode_ = enabled;
+}
+
+bool NightfallStream::get_local_capture_mode() const {
+    return local_capture_mode_;
 }
 
 Ref<FfmpegDecoder> NightfallStream::get_decoder() const {
@@ -341,7 +398,7 @@ void NightfallStream::_on_reconnect_timeout() {
 void NightfallStream::_do_reconnect() {
     if (state_ != STATE_RECONNECTING) return;
     NF_LOG("NightfallStream", "_do_reconnect: last_host_=%s last_server_info_keys=%d last_stream_config_keys=%d",
-        last_host_.utf8().get_data(), last_server_info_.size(), last_stream_config_.size());
+        last_host_.utf8().get_data(), (int)last_server_info_.size(), (int)last_stream_config_.size());
     start_stream(last_host_, last_server_info_, last_stream_config_, last_disable_hw_);
 }
 
@@ -377,6 +434,10 @@ void NightfallStream::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_max_reconnect_attempts"), &NightfallStream::get_max_reconnect_attempts);
     ClassDB::bind_method(D_METHOD("set_reconnect_delay_ms", "ms"), &NightfallStream::set_reconnect_delay_ms);
     ClassDB::bind_method(D_METHOD("get_reconnect_delay_ms"), &NightfallStream::get_reconnect_delay_ms);
+    ClassDB::bind_method(D_METHOD("set_local_capture_mode", "enabled"), &NightfallStream::set_local_capture_mode);
+    ClassDB::bind_method(D_METHOD("get_local_capture_mode"), &NightfallStream::get_local_capture_mode);
+    ClassDB::bind_method(D_METHOD("set_restore_token", "token"), &NightfallStream::set_restore_token);
+    ClassDB::bind_method(D_METHOD("get_restore_token"), &NightfallStream::get_restore_token);
 
     ClassDB::bind_method(D_METHOD("get_decoder"), &NightfallStream::get_decoder);
     ClassDB::bind_method(D_METHOD("get_texture_uploader"), &NightfallStream::get_texture_uploader);
@@ -403,10 +464,13 @@ void NightfallStream::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reconnect"), "set_auto_reconnect", "get_auto_reconnect");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_reconnect_attempts"), "set_max_reconnect_attempts", "get_max_reconnect_attempts");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "reconnect_delay_ms"), "set_reconnect_delay_ms", "get_reconnect_delay_ms");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "local_capture_mode"), "set_local_capture_mode", "get_local_capture_mode");
+    ADD_PROPERTY(PropertyInfo(Variant::STRING, "restore_token"), "set_restore_token", "get_restore_token");
 
     ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state")));
     ADD_SIGNAL(MethodInfo("stream_started"));
     ADD_SIGNAL(MethodInfo("stream_terminated", PropertyInfo(Variant::INT, "error_code"), PropertyInfo(Variant::STRING, "error_message")));
+    ADD_SIGNAL(MethodInfo("restore_token_updated", PropertyInfo(Variant::STRING, "token")));
     ADD_SIGNAL(MethodInfo("stage_starting", PropertyInfo(Variant::STRING, "stage_name")));
     ADD_SIGNAL(MethodInfo("stage_complete", PropertyInfo(Variant::STRING, "stage_name")));
     ADD_SIGNAL(MethodInfo("stage_failed", PropertyInfo(Variant::STRING, "stage_name"), PropertyInfo(Variant::INT, "error_code")));

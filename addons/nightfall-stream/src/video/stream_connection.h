@@ -40,6 +40,9 @@ public:
     Dictionary probe_all_video_formats();
     int get_server_codec_mode_support() const;
 
+    void set_local_capture_mode(bool enabled);
+    bool get_local_capture_mode() const;
+
     Ref<FfmpegDecoder> get_decoder() const;
     Ref<TextureUploader> get_texture_uploader() const;
     Ref<ShaderMaterial> get_shader_material() const;
@@ -135,6 +138,7 @@ private:
     int active_video_format_ = 0;
     AVColorSpace current_colorspace_ = AVCOL_SPC_BT709;
     AVColorRange current_color_range_ = AVCOL_RANGE_UNSPECIFIED;
+    bool local_capture_mode_ = false;
 };
 
 } // namespace godot

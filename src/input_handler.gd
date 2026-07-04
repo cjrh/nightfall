@@ -28,6 +28,16 @@ func _init(owner: Node3D):
 	main = owner
 
 func handle_input(event: InputEvent):
+	if main.is_xr_active and main.tracking_mode == 2:
+		if event is InputEventKey:
+			if event.keycode == KEY_VOLUMEUP or event.keycode == KEY_VOLUMEDOWN:
+				main.get_viewport().set_input_as_handled()
+				if main.mouse_captured_by_stream and main.is_streaming:
+					var button_idx = MOUSE_BUTTON_LEFT if event.keycode == KEY_VOLUMEUP else MOUSE_BUTTON_RIGHT
+					var action = 7 if event.pressed else 8
+					main.stream_backend.send_mouse_button_event(action, button_idx)
+				return
+
 	if main.mouse_captured_by_stream and main.is_streaming:
 		if event is InputEventKey and event.pressed \
 			and event.keycode == KEY_ESCAPE \

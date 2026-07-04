@@ -26,6 +26,7 @@ public:
     void stop();
     void cleanup();
     void decode_and_play_sample(const char *sample_data, int sample_length);
+    void play_local_pcm(const float *data, size_t frames);
 
     bool is_initialized() const;
     int get_channels() const;

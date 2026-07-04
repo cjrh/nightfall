@@ -200,6 +200,12 @@ String AudioRenderer::get_backend_name() const {
     return "none";
 }
 
+void AudioRenderer::play_local_pcm(const float *data, size_t frames) {
+    if (audio_backend_ && running_.load()) {
+        audio_backend_->write_pcm(data, frames);
+    }
+}
+
 void AudioRenderer::_bind_methods() {
     ClassDB::bind_method(D_METHOD("is_initialized"), &AudioRenderer::is_initialized);
     ClassDB::bind_method(D_METHOD("get_channels"), &AudioRenderer::get_channels);

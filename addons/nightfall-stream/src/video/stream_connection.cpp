@@ -12,6 +12,10 @@
 
 #include <cstring>
 
+extern "C" {
+#include <libavutil/pixdesc.h>
+}
+
 #include "nf_log.h"
 
 extern "C" {
@@ -161,10 +165,24 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     }
 
     self->active_video_format_ = videoFormat;
-    NF_LOG("StreamConnection", "Decoder setup: format=0x%x %dx%d@%dfps", videoFormat, width, height, redrawRate);
+    NF_LOG("StreamConnection", "Decoder setup: format=0x%x %dx%d@%dfps local_capture=%d", videoFormat, width, height, redrawRate, self->local_capture_mode_);
+
+    if (self->local_capture_mode_) {
+        NF_LOG("StreamConnection", "Local capture mode: skipping decoder and uploader setup for Sunshine stream");
+        self->decoder_ready_.store(true);
+        return 0;
+    }
 
     int ret = self->decoder_->setup(videoFormat, width, height, false);
-    if (ret != 0) return ret;
+    if (ret != 0) {
+        NF_LOGE("StreamConnection", "Decoder setup FAILED: ret=%d", ret);
+        return ret;
+    }
+
+    NF_LOG("StreamConnection", "Decoder opened: name=%s hw=%s raw=%s", 
+           self->decoder_->get_decoder_name().utf8().get_data(),
+           self->decoder_->is_hw_decode() ? "yes" : "no",
+           self->decoder_->is_raw_decode() ? "yes" : "no");
 
     int pix_fmt = AV_PIX_FMT_YUV420P;
     if (self->decoder_->is_raw_decode()) {
@@ -172,6 +190,7 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     } else if (self->decoder_->is_hw_decode()) {
         pix_fmt = AV_PIX_FMT_NV12;
     }
+    NF_LOG("StreamConnection", "Uploader setup: %dx%d pix_fmt=%d", width, height, pix_fmt);
 
     self->uploader_->setup(width, height,
                            pix_fmt,
@@ -198,8 +217,10 @@ void StreamConnection::_cb_decoder_cleanup() {
     NF_LOG("StreamConnection", "Decoder cleanup");
     auto *self = active_instance_;
     if (self) {
-        self->decoder_->cleanup();
-        self->uploader_->cleanup();
+        if (!self->local_capture_mode_) {
+            self->decoder_->cleanup();
+            self->uploader_->cleanup();
+        }
         self->decoder_ready_.store(false);
         self->h264_hw_upgrade_pending_.store(false);
         self->h264_hw_upgraded_.store(false);
@@ -213,6 +234,18 @@ void StreamConnection::_cb_decoder_cleanup() {
 int StreamConnection::_cb_submit_decode_unit(PDECODE_UNIT decodeUnit) {
     auto *self = active_instance_;
     if (!self || !self->is_streaming_.load()) return DR_OK;
+
+    static int submit_count = 0;
+    submit_count++;
+    if (submit_count <= 3) {
+        NF_LOG("StreamConnection", "Submit DU #%d: size=%d type=%d frame=%d",
+               submit_count, decodeUnit->fullLength, decodeUnit->frameType,
+               decodeUnit->frameNumber);
+    }
+
+    if (self->local_capture_mode_) {
+        return DR_OK;
+    }
 
     AVPacket *pkt = av_packet_alloc();
     if (!pkt) return DR_OK;
@@ -291,6 +324,10 @@ void StreamConnection::_cb_connection_terminated(int errorCode) {
     NF_LOG("StreamConnection", "Connection terminated: %d", errorCode);
     auto *self = active_instance_;
     if (self) {
+        if (self->local_capture_mode_ && (errorCode == ML_ERROR_NO_VIDEO_TRAFFIC || errorCode == ML_ERROR_NO_VIDEO_FRAME)) {
+            NF_LOG("StreamConnection", "Bypassing video watchdog timeout in local capture mode");
+            return;
+        }
         self->is_streaming_.store(false);
         self->queue_cv_.notify_all();
         self->call_deferred("emit_signal", "stream_terminated", errorCode, get_error_string(errorCode));
@@ -615,7 +652,7 @@ void StreamConnection::_decode_thread_func() {
                     }
                 }
 
-                frames_decoded_.fetch_add(1);
+                auto frame_count = frames_decoded_.fetch_add(1) + 1;
 
                 auto decode_done = std::chrono::steady_clock::now();
                 auto decode_done_us = std::chrono::duration_cast<std::chrono::microseconds>(decode_done.time_since_epoch()).count();
@@ -636,6 +673,15 @@ void StreamConnection::_decode_thread_func() {
                         av_frame_free(&sw_frame);
                         sw_frame = nullptr;
                     }
+                }
+
+                if (frame_count <= 5 || frame_count % 60 == 0) {
+                    NF_LOG("StreamConnection", "Frame #%d: pix_fmt=%d(%s) %dx%d colorspace=%d range=%d hw=%s",
+                           frame_count, final_frame->format,
+                           av_get_pix_fmt_name((AVPixelFormat)final_frame->format),
+                           final_frame->width, final_frame->height,
+                           (int)final_frame->colorspace, (int)final_frame->color_range,
+                           final_frame->hw_frames_ctx ? "yes" : "no");
                 }
 
                 AVColorSpace frame_cs = _resolve_frame_colorspace(final_frame);
@@ -724,6 +770,12 @@ void StreamConnection::start(const String &host, const Dictionary &server_info, 
     stream_config_.colorRange = (int)stream_config.get("color_range", COLOR_RANGE_LIMITED);
     stream_config_.encryptionFlags = (int)stream_config.get("encryption_flags", ENCFLG_ALL);
 
+    NF_LOG("StreamConnection", "Starting stream: %dx%d@%d %dkbps fmt=0x%x colorspace=%d range=%d pkt=%d",
+           stream_config_.width, stream_config_.height, stream_config_.fps,
+           stream_config_.bitrate, stream_config_.supportedVideoFormats,
+           stream_config_.colorSpace, stream_config_.colorRange,
+           stream_config_.packetSize);
+
     if (stream_config.has("remote_input_aes_key")) {
         PackedByteArray key = stream_config["remote_input_aes_key"];
         if (key.size() == 16) {
@@ -779,6 +831,14 @@ void StreamConnection::stop() {
 
 bool StreamConnection::is_streaming() const {
     return is_streaming_.load();
+}
+
+void StreamConnection::set_local_capture_mode(bool enabled) {
+    local_capture_mode_ = enabled;
+}
+
+bool StreamConnection::get_local_capture_mode() const {
+    return local_capture_mode_;
 }
 
 int StreamConnection::probe_video_format(int codec_preference, bool disable_hw) {
@@ -901,6 +961,8 @@ void StreamConnection::_bind_methods() {
     ClassDB::bind_method(D_METHOD("start", "host", "server_info", "stream_config", "disable_hw"), &StreamConnection::start, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("stop"), &StreamConnection::stop);
     ClassDB::bind_method(D_METHOD("is_streaming"), &StreamConnection::is_streaming);
+    ClassDB::bind_method(D_METHOD("set_local_capture_mode", "enabled"), &StreamConnection::set_local_capture_mode);
+    ClassDB::bind_method(D_METHOD("get_local_capture_mode"), &StreamConnection::get_local_capture_mode);
     ClassDB::bind_method(D_METHOD("probe_video_format", "codec_preference", "disable_hw"), &StreamConnection::probe_video_format);
     ClassDB::bind_method(D_METHOD("probe_all_video_formats"), &StreamConnection::probe_all_video_formats);
     ClassDB::bind_method(D_METHOD("get_server_codec_mode_support"), &StreamConnection::get_server_codec_mode_support);

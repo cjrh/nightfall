@@ -16,6 +16,7 @@
 
 extern "C" {
 #include <libavutil/pixfmt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/frame.h>
 }
 
@@ -29,9 +30,11 @@ public:
     ~TextureUploader();
 
     void setup(int width, int height, int format, int colorspace, int color_range);
+    void setup_bgra(int width, int height);
     void cleanup();
     void update_from_frame(AVFrame *frame);
     void update_from_raw_nv12(int width, int height, const uint8_t *data, uint32_t y_size, uint32_t uv_size);
+    void update_from_raw_bgra(int width, int height, const uint8_t *data, uint32_t data_size);
     void update_colorspace(int colorspace, int color_range);
     void perform_gpu_update();
 
@@ -43,6 +46,7 @@ protected:
 
 private:
     void _render_thread_setup(int width, int height, int format, int colorspace, int color_range);
+    void _render_thread_setup_bgra(int width, int height);
     void _render_thread_cleanup();
 
     RenderingDevice *rd = nullptr;

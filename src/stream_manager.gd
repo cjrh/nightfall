@@ -4,7 +4,6 @@ extends RefCounted
 var main: Node3D
 var bitrate: int = 20000
 var _v2_yuv_rect: ColorRect = null
-var local_capture_mode: bool = false
 
 func _init(owner: Node3D):
 	main = owner
@@ -12,35 +11,11 @@ func _init(owner: Node3D):
 func _b() -> StreamBackend:
 	return main.stream_backend
 
-func _is_local_host(ip: String) -> bool:
-	if ip == "127.0.0.1" or ip == "::1" or ip.to_lower() == "localhost":
-		return true
-	for addr in IP.get_local_addresses():
-		if addr == ip:
-			return true
-	return false
-
 func start_stream(host_id: int, app_id: int):
 	var w = main.host_resolution.x
 	var h = main.host_resolution.y
 	if main.double_h:
 		w *= 2
-	
-	var ip = ""
-	for h_host in _b().get_hosts():
-		if h_host.get("id") == host_id:
-			ip = h_host.get("localaddress", "")
-			break
-	
-	local_capture_mode = _is_local_host(ip)
-	if local_capture_mode:
-		main._log("[STREAM] Localhost connection detected. Enabling Local Capture Mode.")
-		_b().set_local_capture_mode(true)
-		if _b()._v2 and _b()._v2.has_method("set_restore_token"):
-			_b()._v2.set_restore_token(main.pipewire_restore_token)
-	else:
-		_b().set_local_capture_mode(false)
-		
 	main._log("[STREAM] Starting stream host_id=%d app_id=%d res=%dx%d@%d" % [host_id, app_id, w, h, main.stream_fps])
 	if main.bitrate_idx >= 0:
 		bitrate = main.bitrates[main.bitrate_idx] * 1000
@@ -48,16 +23,10 @@ func start_stream(host_id: int, app_id: int):
 		bitrate = _auto_bitrate(w, h)
 	resize_stream_viewport(w, h)
 	var options = {}
-	if local_capture_mode:
-		options["width"] = 320
-		options["height"] = 240
-		options["fps"] = 1
-		options["bitrate"] = 500
-	else:
-		options["width"] = w
-		options["height"] = h
-		options["fps"] = main.stream_fps
-		options["bitrate"] = bitrate
+	options["width"] = w
+	options["height"] = h
+	options["fps"] = main.stream_fps
+	options["bitrate"] = bitrate
 	options["packet_size"] = 1024
 	options["streaming_remotely"] = 2
 	options["surroundAudioInfo"] = 0xCA0203
@@ -100,16 +69,10 @@ func _on_v2_launch_response(response: Dictionary):
 	var br = response.get("bitrate", 20000)
 
 	var stream_config = {}
-	if local_capture_mode:
-		stream_config["width"] = 320
-		stream_config["height"] = 240
-		stream_config["fps"] = 1
-		stream_config["bitrate"] = 500
-	else:
-		stream_config["width"] = w
-		stream_config["height"] = h
-		stream_config["fps"] = fps
-		stream_config["bitrate"] = br
+	stream_config["width"] = w
+	stream_config["height"] = h
+	stream_config["fps"] = fps
+	stream_config["bitrate"] = br
 	stream_config["packet_size"] = response.get("packet_size", 1024)
 	stream_config["streaming_remotely"] = response.get("streaming_remotely", 2)
 	stream_config["audio_configuration"] = response.get("audio_configuration", 0x0302CA)
@@ -271,7 +234,7 @@ func _setup_v2_yuv_rect():
 		return
 	var mat = _b().get_shader_material()
 	if not mat:
-		main._log("[STREAM] No shader material from TextureUploader yet")
+		main._log("[STREAM] No shader material from TextureUploader yet - will retry")
 		return
 	_v2_yuv_rect = ColorRect.new()
 	_v2_yuv_rect.name = "V2YuvRect"
@@ -293,6 +256,9 @@ func update_stats():
 		return
 	if not main._ui_status_label:
 		return
+	if not _v2_yuv_rect:
+		_setup_v2_yuv_rect()
+	var new_frame = _b().consume_new_frame()
 	var vw = _b().get_video_width()
 	var vh = _b().get_video_height()
 	if vw == 0 or vh == 0:
@@ -304,10 +270,13 @@ func update_stats():
 	var ip = main.get_node("%IPInput").text
 	var ip_display = ip if not ip.is_empty() else "?"
 	var dropped = _b().get_frames_dropped()
+	var decoded = _b().get_frames_decoded()
 	var latency_ms = _b().get_last_frame_latency() / 1000.0
 	var bitrate_mbps = bitrate / 1000.0
 	var refresh_hz = main.display_refresh_rate
 	var codec_name = main.codec_labels[main.codec_preference] if main.codec_preference < main.codec_labels.size() else "?"
+	if decoded > 0 and not new_frame:
+		main._log("[STREAM] Frames decoded=%d but no new frame consumed!" % decoded)
 	var txt = ip_display + " \u2022 " + str(vw) + "x" + str(vh) + " " + str(main.stream_fps) + "fps " + str(int(bitrate_mbps)) + "Mbps " + codec_name + " " + hw
 	txt += " \u2022 " + str(int(latency_ms)) + "ms"
 	txt += " \u2022 " + str(int(refresh_hz)) + "Hz \u2022 " + str(int(main.stats_fps)) + "fps"

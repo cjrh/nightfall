@@ -21,6 +21,94 @@ void TextureUploader::setup(int width, int height, int format, int colorspace, i
     }
 }
 
+void TextureUploader::setup_bgra(int width, int height) {
+    use_shader_conversion = true;
+    is_nv12 = false;
+    current_width = width;
+    current_height = height;
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    if (rs) {
+        rs->call_on_render_thread(callable_mp(this, &TextureUploader::_render_thread_setup_bgra).bind(width, height));
+    }
+}
+
+void TextureUploader::_render_thread_setup_bgra(int width, int height) {
+    std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    rd = rs ? rs->get_rendering_device() : nullptr;
+
+    if (rd) {
+        for (int i = 0; i < 3; i++) {
+            rd_texture_wrappers[i].unref();
+            if (rs_texture_rid[i].is_valid()) {
+                rs->free_rid(rs_texture_rid[i]);
+                rs_texture_rid[i] = RID();
+            }
+            if (rd_texture_rid[i].is_valid()) {
+                rd->free_rid(rd_texture_rid[i]);
+                rd_texture_rid[i] = RID();
+            }
+        }
+
+        Ref<RDTextureFormat> tf;
+        tf.instantiate();
+        tf->set_width(width);
+        tf->set_height(height);
+        tf->set_depth(1);
+        tf->set_array_layers(1);
+        tf->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+        tf->set_usage_bits(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT);
+        tf->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
+
+        Ref<RDTextureView> tv;
+        tv.instantiate();
+
+        PackedByteArray data;
+        data.resize(width * height * 4);
+        data.fill(0);
+
+        TypedArray<PackedByteArray> data_array;
+        data_array.push_back(data);
+
+        rd_texture_rid[0] = rd->texture_create(tf, tv, data_array);
+        rs_texture_rid[0] = rs->texture_rd_create(rd_texture_rid[0]);
+
+        if (rd_texture_wrappers[0].is_null()) {
+            rd_texture_wrappers[0].instantiate();
+        }
+        rd_texture_wrappers[0]->set_texture_rd_rid(rd_texture_rid[0]);
+    } else {
+        plane_images[0] = Image::create(width, height, false, Image::FORMAT_RGBA8);
+        plane_images[0]->fill(Color(0, 0, 0, 1));
+        plane_textures[0] = ImageTexture::create_from_image(plane_images[0]);
+    }
+
+    if (yuv_shader.is_null()) {
+        yuv_shader.instantiate();
+        yuv_shader->set_code(YUV_SHADER_CODE);
+    }
+    if (shader_material.is_null()) {
+        shader_material.instantiate();
+        shader_material->set_shader(yuv_shader);
+    }
+
+    if (shader_material.is_valid()) {
+        shader_material->set_shader_parameter("is_semi_planar", false);
+        shader_material->set_shader_parameter("is_nv12_rd", false);
+        shader_material->set_shader_parameter("color_matrix_type", 3);
+        shader_material->set_shader_parameter("color_range", 1);
+        shader_material->set_shader_parameter("swap_uv", false);
+
+        if (rd) {
+            shader_material->set_shader_parameter("tex_y", rd_texture_wrappers[0]);
+        } else {
+            shader_material->set_shader_parameter("tex_y", plane_textures[0]);
+        }
+    }
+}
+
 void TextureUploader::_render_thread_setup(int width, int height, int format, int colorspace, int color_range) {
     std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
     AVPixelFormat av_format = (AVPixelFormat)format;
@@ -175,6 +263,15 @@ void TextureUploader::update_colorspace(int colorspace, int color_range) {
 void TextureUploader::update_from_frame(AVFrame *frame) {
     if (!frame || !use_shader_conversion) return;
 
+    static int upload_count = 0;
+    upload_count++;
+    if (upload_count <= 3 || upload_count % 60 == 0) {
+        NF_LOG("TextureUploader", "Update #%d: %dx%d fmt=%d(%s) nv12=%d linesize=%d,%d,%d",
+               upload_count, frame->width, frame->height, frame->format,
+               av_get_pix_fmt_name((AVPixelFormat)frame->format),
+               is_nv12, frame->linesize[0], frame->linesize[1], frame->linesize[2]);
+    }
+
     RenderingServer *rs = RenderingServer::get_singleton();
 
     if (rd) {
@@ -325,6 +422,42 @@ void TextureUploader::update_from_raw_nv12(int width, int height, const uint8_t 
         rs->texture_2d_update(plane_textures[1]->get_rid(), plane_images[1], 0);
         plane_images[2]->set_data(uv_w, uv_h, false, Image::FORMAT_L8, v_buf);
         rs->texture_2d_update(plane_textures[2]->get_rid(), plane_images[2], 0);
+    }
+}
+
+void TextureUploader::update_from_raw_bgra(int width, int height, const uint8_t *data, uint32_t data_size) {
+    if (!data || !use_shader_conversion) return;
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+
+    if (rd) {
+        std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
+
+        int required = width * height * 4;
+        if (rd_texture_buffers[0].size() != required)
+            rd_texture_buffers[0].resize(required);
+
+        int src_stride = width * 4;
+        int dst_stride = width * 4;
+        if (src_stride == dst_stride) {
+            memcpy(rd_texture_buffers[0].ptrw(), data, required);
+        } else {
+            uint8_t *dst = rd_texture_buffers[0].ptrw();
+            for (int i = 0; i < height; i++)
+                memcpy(dst + i * dst_stride, data + i * src_stride, dst_stride);
+        }
+
+        pending_gpu_update.store(true);
+        rs->call_on_render_thread(callable_mp(this, &TextureUploader::perform_gpu_update));
+        return;
+    }
+
+    PackedByteArray bgra_buf;
+    bgra_buf.resize(data_size);
+    memcpy(bgra_buf.ptrw(), data, data_size);
+    Ref<Image> img = Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, bgra_buf);
+    if (img.is_valid() && !img->is_empty() && plane_textures[0].is_valid()) {
+        rs->texture_2d_update(plane_textures[0]->get_rid(), img, 0);
     }
 }
 

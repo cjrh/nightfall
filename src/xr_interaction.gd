@@ -112,7 +112,8 @@ func handle_pointer_interaction():
 	var is_now_clicking = _is_now_clicking()
 	if is_now_clicking and not main.was_clicking and not _click_pending_release:
 		_pinch_start_time = Time.get_ticks_msec()
-		if active_raycast.is_colliding() and active_raycast.get_collider().get_parent() == main.screen_mesh:
+		var col = active_raycast.get_collider() if active_raycast.is_colliding() else null
+		if col and col.get_parent() == main.screen_mesh:
 			var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 			var uv = main._hit_point_to_uv(hit_pos)
 			var uv_x = uv.x
@@ -130,7 +131,8 @@ func handle_pointer_interaction():
 		var pad_blocking = main.controller_mapper and main.controller_mapper.is_active() and main.controller_mapper.ctrl_type == ControllerMapper.CtrlType.GAMEPAD
 		var tp_blocking = main.virtual_keyboard and main.virtual_keyboard.trackpad_active
 		if not pad_blocking and not tp_blocking and is_gripping and not main.was_right_clicking and main.right_click_cooldown <= 0.0:
-			if active_raycast.is_colliding() and active_raycast.get_collider().get_parent() == main.screen_mesh:
+			var col = active_raycast.get_collider() if active_raycast.is_colliding() else null
+			if col and col.get_parent() == main.screen_mesh:
 				var hit_pos = main._get_steady_hit(active_raycast.get_collision_point())
 				var uv = main._hit_point_to_uv(hit_pos)
 				var uv_x = uv.x

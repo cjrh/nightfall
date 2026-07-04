@@ -492,15 +492,20 @@ int DBusPortal::open_pipewire_remote() {
 
     int pw_fd = -1;
     r = sd_bus_message_read(reply, "h", &pw_fd);
-    sd_bus_message_unref(reply);
-
     if (r < 0 || pw_fd < 0) {
         NF_LOG("DBusPortal", "Failed to read PipeWire FD from reply");
+        sd_bus_message_unref(reply);
         return -1;
     }
 
-    // Duplicate the FD so we own it
     int dup_fd = fcntl(pw_fd, F_DUPFD_CLOEXEC, 0);
+    sd_bus_message_unref(reply);
+
+    if (dup_fd < 0) {
+        NF_LOG("DBusPortal", "Failed to duplicate PipeWire FD");
+        return -1;
+    }
+
     NF_LOG("DBusPortal", "PipeWire remote opened, FD: %d", dup_fd);
     return dup_fd;
 }

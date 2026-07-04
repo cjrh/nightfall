@@ -243,19 +243,19 @@ int FfmpegDecoder::probe_video_format(int codec_preference, bool disable_hw) {
     bool av1_ok = (codec_preference == CODEC_FAMILY_AUTO || codec_preference == CODEC_FAMILY_AV1) && test_family(CODEC_FAMILY_AV1);
 
     if (codec_preference == CODEC_FAMILY_AV1 && av1_ok)
-        supported_mask |= VIDEO_FORMAT_MASK_AV1;
+        supported_mask |= VIDEO_FORMAT_AV1_MAIN8;
     else if (codec_preference == CODEC_FAMILY_H265 && hevc_ok)
-        supported_mask |= VIDEO_FORMAT_MASK_H265;
+        supported_mask |= VIDEO_FORMAT_H265;
     else if (codec_preference == CODEC_FAMILY_H264 && h264_ok)
-        supported_mask |= VIDEO_FORMAT_MASK_H264;
+        supported_mask |= VIDEO_FORMAT_H264;
 
     if (codec_preference == CODEC_FAMILY_AUTO) {
-        if (h264_ok) supported_mask |= VIDEO_FORMAT_MASK_H264;
-        if (hevc_ok) supported_mask |= VIDEO_FORMAT_MASK_H265;
-        if (av1_ok) supported_mask |= VIDEO_FORMAT_MASK_AV1;
+        if (h264_ok) supported_mask |= VIDEO_FORMAT_H264;
+        if (hevc_ok) supported_mask |= VIDEO_FORMAT_H265;
+        if (av1_ok) supported_mask |= VIDEO_FORMAT_AV1_MAIN8;
     }
     if (supported_mask == 0)
-        supported_mask = VIDEO_FORMAT_MASK_H264;
+        supported_mask = VIDEO_FORMAT_H264;
 
     return supported_mask;
 }

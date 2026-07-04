@@ -21,7 +21,7 @@ func save_state():
 	save.set_value("controller", "active", main.controller_mapper.active)
 	save.set_value("controller", "ctrl_type", main.controller_mapper.ctrl_type)
 	save.set_value("controller", "btn_toggle", main.controller_mapper.btn_toggle)
-	save.set_value("controller", "hand_tracking_enabled", main.hand_tracking_enabled)
+	save.set_value("controller", "hand_tracking_enabled", main.tracking_mode)
 	save.set_value("stream", "auto_reconnect", main.auto_reconnect_enabled)
 	save.set_value("stream", "idle_timeout_min", main.idle_timeout_min)
 	save.set_value("local_capture", "restore_token", main.pipewire_restore_token)
@@ -90,7 +90,7 @@ func sync_ui_to_settings():
 		main.bezel_mesh.visible = main.bezel_enabled
 	if main.ui_controller:
 		main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
-		main.ui_controller.update_option_btn(main._ui_hand_tracking_btn, "On" if main.hand_tracking_enabled else "Off")
+		main.ui_controller.update_option_btn(main._ui_hand_tracking_btn, main.tracking_labels[clampi(main.tracking_mode, 0, main.tracking_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[clampi(main.curvature, 0, main.curvature_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[clampi(main.passthrough_mode, 0, main.passthrough_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_render_btn, main.smooth_labels[clampi(main.smooth_mode, 0, main.smooth_labels.size() - 1)])
@@ -129,7 +129,11 @@ func load_state():
 	else:
 		main.pointer_steady = int(saved_steady)
 	main.codec_preference = save.get_value("screen", "codec_preference", 1)
-	main.hand_tracking_enabled = save.get_value("controller", "hand_tracking_enabled", true)
+	var raw_tracking = save.get_value("controller", "hand_tracking_enabled", 0)
+	if raw_tracking is bool:
+		main.tracking_mode = 1 if raw_tracking else 0
+	else:
+		main.tracking_mode = int(raw_tracking)
 	if main.controller_mapper:
 		if save.has_section_key("controller", "active"):
 			main.controller_mapper.active = save.get_value("controller", "active", false)

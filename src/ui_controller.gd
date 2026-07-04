@@ -426,7 +426,7 @@ func build_ui():
 	control_row1.add_child(main._ui_steady_btn)
 	main._ui_bezel_btn = make_option_btn("Bezel", "On")
 	control_row1.add_child(main._ui_bezel_btn)
-	main._ui_hand_tracking_btn = make_option_btn("Hand Tracking", "On")
+	main._ui_hand_tracking_btn = make_option_btn("Tracking", "Off")
 	control_row1.add_child(main._ui_hand_tracking_btn)
 
 	var control_gap1 = Control.new()

@@ -16,6 +16,9 @@ class FfmpegDecoder;
 class TextureUploader;
 class AudioRenderer;
 class InputBridge;
+class PipeWireCapture;
+class DmaBufImporter;
+class PipeWireAudio;
 
 class NightfallStream : public Node {
     GDCLASS(NightfallStream, Node);
@@ -52,6 +55,11 @@ public:
     int get_max_reconnect_attempts() const;
     void set_reconnect_delay_ms(int ms);
     int get_reconnect_delay_ms() const;
+
+    void set_local_capture_mode(bool enabled);
+    bool get_local_capture_mode() const;
+    void set_restore_token(const String &token);
+    String get_restore_token() const;
 
     Ref<FfmpegDecoder> get_decoder() const;
     Ref<TextureUploader> get_texture_uploader() const;
@@ -114,6 +122,13 @@ private:
     int reconnect_delay_ms_ = 2000;
     int reconnect_attempts_ = 0;
     Timer *reconnect_timer_ = nullptr;
+
+    bool local_capture_mode_ = false;
+    String restore_token_;
+
+    PipeWireCapture *pipewire_capture_ = nullptr;
+    DmaBufImporter *dmabuf_importer_ = nullptr;
+    PipeWireAudio *pipewire_audio_ = nullptr;
 
     double stage_progress_ = 0.0;
     String current_stage_;

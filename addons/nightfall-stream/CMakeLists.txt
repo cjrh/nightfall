@@ -54,6 +54,8 @@ if(TARGET_PLATFORM STREQUAL "steamos" OR TARGET_PLATFORM STREQUAL "linux")
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
         pkg_check_modules(AVAHI QUIET avahi-client)
+        pkg_check_modules(PIPEWIRE QUIET IMPORTED_TARGET libpipewire-0.3)
+        pkg_check_modules(SYSTEMD QUIET IMPORTED_TARGET libsystemd)
     endif()
 endif()
 
@@ -120,6 +122,14 @@ if(TARGET_PLATFORM STREQUAL "steamos" OR TARGET_PLATFORM STREQUAL "linux")
         target_link_libraries(${LIBNAME} PRIVATE ${AVAHI_LIBRARIES})
         target_include_directories(${LIBNAME} PRIVATE ${AVAHI_INCLUDE_DIRS})
     endif()
+    if(PIPEWIRE_FOUND)
+        target_link_libraries(${LIBNAME} PRIVATE PkgConfig::PIPEWIRE)
+        target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_HAS_PIPEWIRE)
+    endif()
+    if(SYSTEMD_FOUND)
+        target_link_libraries(${LIBNAME} PRIVATE PkgConfig::SYSTEMD)
+        target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_HAS_SYSTEMD)
+    endif()
     if(TARGET_PLATFORM STREQUAL "linux")
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")
     endif()
@@ -154,3 +164,17 @@ add_custom_command(TARGET ${LIBNAME} POST_BUILD
         "${GODOT_ADDON_DIR}/$<TARGET_FILE_NAME:${LIBNAME}>"
     COMMENT "Deploying to Godot addon directory..."
 )
+
+# Standalone CLI stream test (desktop only)
+if(TARGET_PLATFORM STREQUAL "linux" OR TARGET_PLATFORM STREQUAL "steamos")
+    add_executable(stream_test
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../test/stream_test.cpp"
+    )
+    target_compile_features(stream_test PRIVATE cxx_std_17)
+    target_include_directories(stream_test PRIVATE src include ${FFMPEG_INCLUDE_DIRS})
+    target_link_libraries(stream_test PRIVATE
+        moonlight-common-c::moonlight-common-c
+        ${FFMPEG_LIBRARIES}
+        pthread dl
+    )
+endif()
