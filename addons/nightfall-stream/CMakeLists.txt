@@ -172,14 +172,15 @@ add_custom_command(TARGET ${LIBNAME} POST_BUILD
 
 # Standalone CLI stream test (desktop only)
 if(TARGET_PLATFORM STREQUAL "linux" OR TARGET_PLATFORM STREQUAL "steamos")
-    add_executable(stream_test
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../test/stream_test.cpp"
-    )
-    target_compile_features(stream_test PRIVATE cxx_std_17)
-    target_include_directories(stream_test PRIVATE src include ${FFMPEG_INCLUDE_DIRS})
-    target_link_libraries(stream_test PRIVATE
-        moonlight-common-c::moonlight-common-c
-        ${FFMPEG_LIBRARIES}
-        pthread dl
-    )
+    set(TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../test/stream_test.cpp")
+    if(EXISTS "${TEST_SRC}")
+        add_executable(stream_test "${TEST_SRC}")
+        target_compile_features(stream_test PRIVATE cxx_std_17)
+        target_include_directories(stream_test PRIVATE src include ${FFMPEG_INCLUDE_DIRS})
+        target_link_libraries(stream_test PRIVATE
+            moonlight-common-c::moonlight-common-c
+            ${FFMPEG_LIBRARIES}
+            pthread dl
+        )
+    endif()
 endif()

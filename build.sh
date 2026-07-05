@@ -46,11 +46,7 @@ if [ "$PLATFORM" = "linux" ] || [ "$PLATFORM" = "appimage" ]; then
   fi
 
   echo "Building Linux .so in Ubuntu 22.04 Docker container (glibc 2.35 compat)..."
-  if [ ! -f "$LINUX_SO" ]; then
-    bash "$SCRIPT_DIR/docker-build-linux.sh"
-  else
-    echo "Linux .so already exists, skipping Docker build"
-  fi
+  bash "$SCRIPT_DIR/docker-build-linux.sh"
 
   if [ ! -f "$LINUX_SO" ]; then
     echo "Error: Linux .so build failed"
