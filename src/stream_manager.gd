@@ -51,8 +51,8 @@ func start_stream(host_id: int, app_id: int):
 	if local_capture_mode:
 		options["width"] = 320
 		options["height"] = 240
-		options["fps"] = 1
-		options["bitrate"] = 500
+		options["fps"] = 10
+		options["bitrate"] = 2000
 	else:
 		options["width"] = w
 		options["height"] = h
@@ -103,8 +103,8 @@ func _on_v2_launch_response(response: Dictionary):
 	if local_capture_mode:
 		stream_config["width"] = 320
 		stream_config["height"] = 240
-		stream_config["fps"] = 1
-		stream_config["bitrate"] = 500
+		stream_config["fps"] = 10
+		stream_config["bitrate"] = 2000
 	else:
 		stream_config["width"] = w
 		stream_config["height"] = h
@@ -281,6 +281,21 @@ func _setup_v2_yuv_rect():
 	main.stream_target.visible = false
 	main.stream_viewport.add_child(_v2_yuv_rect)
 	main._log("[STREAM] YUV ColorRect added to StreamViewport")
+	
+	# Force shader params immediately (Godot may duplicate the material on assignment)
+	_update_yuv_shader_params()
+
+func _update_yuv_shader_params():
+	if not _v2_yuv_rect or not _v2_yuv_rect.material:
+		return
+	var mat = _v2_yuv_rect.material
+	if not mat is ShaderMaterial:
+		return
+	if local_capture_mode:
+		mat.set_shader_parameter("color_matrix_type", 3)
+		mat.set_shader_parameter("color_range", 1)
+		mat.set_shader_parameter("is_semi_planar", false)
+		mat.set_shader_parameter("is_nv12_rd", false)
 
 func teardown_v2_yuv_rect():
 	if _v2_yuv_rect:
@@ -295,6 +310,7 @@ func update_stats():
 		return
 	if not _v2_yuv_rect:
 		_setup_v2_yuv_rect()
+	_update_yuv_shader_params()
 	var new_frame = _b().consume_new_frame()
 	var vw = _b().get_video_width()
 	var vh = _b().get_video_height()
