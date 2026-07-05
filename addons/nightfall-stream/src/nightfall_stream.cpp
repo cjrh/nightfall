@@ -82,21 +82,20 @@ void NightfallStream::_process(double /*delta*/) {
                     last_h = frame.height;
                     uploader->setup_bgra(frame.width, frame.height);
                 }
-                // Convert BGRA (X11 native) to RGBA in a contiguous buffer
-                // Swaps B and R channels, sets alpha to 255
+                // X11 SHM gives BGRA (B,G,R,X byte order).
+                // Copy to contiguous buffer, handling any row padding.
+                // Shader does BGRA→RGBA swizzle when color_matrix_type==3.
                 uint32_t data_size = frame.width * frame.height * 4;
-                std::vector<uint8_t> rgba(data_size);
-                for (uint32_t y = 0; y < frame.height; y++) {
-                    const uint8_t *src = frame.data + y * frame.stride;
-                    uint8_t *dst = rgba.data() + y * frame.width * 4;
-                    for (uint32_t x = 0; x < frame.width; x++) {
-                        dst[x*4 + 0] = src[x*4 + 2]; // R ← B
-                        dst[x*4 + 1] = src[x*4 + 1]; // G ← G
-                        dst[x*4 + 2] = src[x*4 + 0]; // B ← R
-                        dst[x*4 + 3] = 0xFF;          // A ← 255
-                    }
+                if (frame.stride == frame.width * 4) {
+                    uploader->update_from_raw_bgra(frame.width, frame.height, frame.data, data_size);
+                } else {
+                    std::vector<uint8_t> contiguous(data_size);
+                    for (uint32_t y = 0; y < frame.height; y++)
+                        memcpy(contiguous.data() + y * frame.width * 4,
+                               frame.data + y * frame.stride,
+                               frame.width * 4);
+                    uploader->update_from_raw_bgra(frame.width, frame.height, contiguous.data(), data_size);
                 }
-                uploader->update_from_raw_bgra(frame.width, frame.height, rgba.data(), data_size);
             }
             x11_capture_->release_frame();
         }
