@@ -40,7 +40,7 @@ void AudioRenderer::_cb_cleanup() {
 
 void AudioRenderer::_cb_decode_and_play_sample(char *sampleData, int sampleLength) {
     auto *self = active_instance_;
-    if (self) self->decode_and_play_sample(sampleData, sampleLength);
+    if (self && !self->muted_.load()) self->decode_and_play_sample(sampleData, sampleLength);
 }
 
 int AudioRenderer::init(int audio_configuration, const POPUS_MULTISTREAM_CONFIGURATION opus_config, void * /*context*/, int /*ar_flags*/) {
@@ -204,6 +204,14 @@ void AudioRenderer::play_local_pcm(const float *data, size_t frames) {
     if (audio_backend_ && running_.load()) {
         audio_backend_->write_pcm(data, frames);
     }
+}
+
+void AudioRenderer::set_muted(bool muted) {
+    muted_.store(muted);
+}
+
+bool AudioRenderer::is_muted() const {
+    return muted_.load();
 }
 
 void AudioRenderer::_bind_methods() {

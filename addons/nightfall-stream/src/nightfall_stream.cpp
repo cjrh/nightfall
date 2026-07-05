@@ -82,21 +82,21 @@ void NightfallStream::_process(double /*delta*/) {
                     last_h = frame.height;
                     uploader->setup_bgra(frame.width, frame.height);
                 }
-                // X11 SHM may have row padding (stride > width*4)
-                // Copy row-by-row if stride differs from width*4
+                // Convert BGRA (X11 native) to RGBA in a contiguous buffer
+                // Swaps B and R channels, sets alpha to 255
                 uint32_t data_size = frame.width * frame.height * 4;
-                if (frame.stride == frame.width * 4) {
-                    uploader->update_from_raw_bgra(frame.width, frame.height, frame.data, data_size);
-                } else {
-                    // Stride mismatch - copy row-by-row into contiguous buffer
-                    std::vector<uint8_t> contiguous(data_size);
-                    for (uint32_t y = 0; y < frame.height; y++) {
-                        memcpy(contiguous.data() + y * frame.width * 4,
-                               frame.data + y * frame.stride,
-                               frame.width * 4);
+                std::vector<uint8_t> rgba(data_size);
+                for (uint32_t y = 0; y < frame.height; y++) {
+                    const uint8_t *src = frame.data + y * frame.stride;
+                    uint8_t *dst = rgba.data() + y * frame.width * 4;
+                    for (uint32_t x = 0; x < frame.width; x++) {
+                        dst[x*4 + 0] = src[x*4 + 2]; // R ← B
+                        dst[x*4 + 1] = src[x*4 + 1]; // G ← G
+                        dst[x*4 + 2] = src[x*4 + 0]; // B ← R
+                        dst[x*4 + 3] = 0xFF;          // A ← 255
                     }
-                    uploader->update_from_raw_bgra(frame.width, frame.height, contiguous.data(), data_size);
                 }
+                uploader->update_from_raw_bgra(frame.width, frame.height, rgba.data(), data_size);
             }
             x11_capture_->release_frame();
         }
@@ -139,6 +139,12 @@ void NightfallStream::start_stream(const String &host, const Dictionary &server_
     stream_connection_->start(host, server_info, stream_config, disable_hw);
 
     if (local_capture_mode_) {
+        // Mute Sunshine audio - audio is already on the machine
+        Ref<AudioRenderer> audio = get_audio_renderer();
+        if (audio.is_valid()) {
+            audio->set_muted(true);
+            NF_LOG("NightfallStream", "Audio muted (local capture mode)");
+        }
 #ifdef NIGHTFALL_HAS_X11
         if (!is_wayland()) {
             NF_LOG("NightfallStream", "Starting X11 SHM capture for local mode (X11 detected)");
@@ -164,6 +170,10 @@ void NightfallStream::start_stream(const String &host, const Dictionary &server_
 
 void NightfallStream::stop_stream() {
     if (state_ == STATE_IDLE) return;
+
+    // Unmute audio
+    Ref<AudioRenderer> audio = get_audio_renderer();
+    if (audio.is_valid()) audio->set_muted(false);
 
     if (x11_capture_) {
         x11_capture_->stop();

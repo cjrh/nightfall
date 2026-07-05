@@ -27,6 +27,8 @@ public:
     void cleanup();
     void decode_and_play_sample(const char *sample_data, int sample_length);
     void play_local_pcm(const float *data, size_t frames);
+    void set_muted(bool muted);
+    bool is_muted() const;
 
     bool is_initialized() const;
     int get_channels() const;
@@ -61,6 +63,7 @@ private:
 
     std::atomic<bool> initialized_{false};
     std::atomic<bool> running_{false};
+    std::atomic<bool> muted_{false};
 };
 
 } // namespace godot
