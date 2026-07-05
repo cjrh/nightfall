@@ -498,7 +498,10 @@ void StreamConnection::_connection_thread_func() {
     clCallbacks.setControllerLED = _cb_set_controller_led;
     clCallbacks.logMessage = _cb_log_message;
 
-    int ret = LiStartConnection(&server_info_, &stream_config_, &clCallbacks, &drCallbacks, &arCallbacks, nullptr, 0, nullptr, 0);
+    // In local capture mode, skip audio entirely - audio is already on the machine
+    PAUDIO_RENDERER_CALLBACKS arPtr = local_capture_mode_ ? nullptr : &arCallbacks;
+
+    int ret = LiStartConnection(&server_info_, &stream_config_, &clCallbacks, &drCallbacks, arPtr, nullptr, 0, nullptr, 0);
 
     if (ret != 0) {
         is_streaming_.store(false);

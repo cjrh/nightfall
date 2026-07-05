@@ -134,7 +134,10 @@ void NightfallStream::start_stream(const String &host, const Dictionary &server_
     _reset_reconnect();
     emit_signal("state_changed", (int)state_);
 
-    stream_connection_->set_local_capture_mode(local_capture_mode_);
+    // Don't propagate local_capture_mode to StreamConnection.
+    // The Sunshine stream must run normally so the decoder sets up the
+    // ShaderMaterial/texture pipeline. X11 capture frames override the
+    // texture content via setup_bgra() + update_from_raw_bgra().
     stream_connection_->start(host, server_info, stream_config, disable_hw);
 
     if (local_capture_mode_) {
