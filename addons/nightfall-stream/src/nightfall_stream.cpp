@@ -4,6 +4,7 @@
 #include "video/texture_uploader.h"
 #include "video/pipewire_capture.h"
 #include "video/dmabuf_importer.h"
+#include "video/x11_capture.h"
 #include "audio/audio_renderer.h"
 #include "audio/pipewire_audio.h"
 #include "input/input_bridge.h"
@@ -17,6 +18,14 @@
 #include "nf_log.h"
 
 using namespace godot;
+
+static bool is_wayland() {
+    const char *xdg = getenv("XDG_SESSION_TYPE");
+    if (xdg && strcmp(xdg, "wayland") == 0) return true;
+    const char *wl = getenv("WAYLAND_DISPLAY");
+    if (wl && wl[0]) return true;
+    return false;
+}
 
 NightfallStream::NightfallStream() {}
 
@@ -62,6 +71,31 @@ void NightfallStream::_process(double /*delta*/) {
             pipewire_capture_->release_frame(frame.spa_buf_ptr);
         }
     }
+    if (x11_capture_ && x11_capture_->has_new_frame()) {
+        X11Capture::FrameData frame;
+        if (x11_capture_->get_latest_frame(frame) && frame.data) {
+            Ref<TextureUploader> uploader = get_texture_uploader();
+            if (uploader.is_valid()) {
+                uploader->setup_bgra(frame.width, frame.height);
+                // X11 SHM may have row padding (stride > width*4)
+                // Copy row-by-row if stride differs from width*4
+                uint32_t data_size = frame.width * frame.height * 4;
+                if (frame.stride == frame.width * 4) {
+                    uploader->update_from_raw_bgra(frame.width, frame.height, frame.data, data_size);
+                } else {
+                    // Stride mismatch - copy row-by-row into contiguous buffer
+                    std::vector<uint8_t> contiguous(data_size);
+                    for (uint32_t y = 0; y < frame.height; y++) {
+                        memcpy(contiguous.data() + y * frame.width * 4,
+                               frame.data + y * frame.stride,
+                               frame.width * 4);
+                    }
+                    uploader->update_from_raw_bgra(frame.width, frame.height, contiguous.data(), data_size);
+                }
+            }
+            x11_capture_->release_frame();
+        }
+    }
 }
 
 void NightfallStream::set_restore_token(const String &token) {
@@ -100,19 +134,37 @@ void NightfallStream::start_stream(const String &host, const Dictionary &server_
     stream_connection_->start(host, server_info, stream_config, disable_hw);
 
     if (local_capture_mode_) {
-        NF_LOG("NightfallStream", "Starting PipeWire capture for local mode");
-        pipewire_capture_ = new PipeWireCapture();
-        dmabuf_importer_ = new DmaBufImporter(get_texture_uploader());
-        pipewire_capture_->start(restore_token_.utf8().get_data());
+#ifdef NIGHTFALL_HAS_X11
+        if (!is_wayland()) {
+            NF_LOG("NightfallStream", "Starting X11 SHM capture for local mode (X11 detected)");
+            x11_capture_ = new X11Capture();
+            if (!x11_capture_->start()) {
+                NF_LOGE("NightfallStream", "X11 capture failed to start");
+                delete x11_capture_;
+                x11_capture_ = nullptr;
+            }
+        } else
+#endif
+        {
+            NF_LOG("NightfallStream", "Starting PipeWire capture for local mode (Wayland detected)");
+            pipewire_capture_ = new PipeWireCapture();
+            dmabuf_importer_ = new DmaBufImporter(get_texture_uploader());
+            pipewire_capture_->start(restore_token_.utf8().get_data());
 
-        pipewire_audio_ = new PipeWireAudio(get_audio_renderer().ptr());
-        pipewire_audio_->start();
+            pipewire_audio_ = new PipeWireAudio(get_audio_renderer().ptr());
+            pipewire_audio_->start();
+        }
     }
 }
 
 void NightfallStream::stop_stream() {
     if (state_ == STATE_IDLE) return;
 
+    if (x11_capture_) {
+        x11_capture_->stop();
+        delete x11_capture_;
+        x11_capture_ = nullptr;
+    }
     if (pipewire_audio_) {
         pipewire_audio_->stop();
         delete pipewire_audio_;

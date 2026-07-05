@@ -4,6 +4,7 @@ extends RefCounted
 var main: Node3D
 var bitrate: int = 20000
 var _v2_yuv_rect: ColorRect = null
+var local_capture_mode: bool = false
 
 func _init(owner: Node3D):
 	main = owner
@@ -11,22 +12,52 @@ func _init(owner: Node3D):
 func _b() -> StreamBackend:
 	return main.stream_backend
 
+func _is_local_host(ip: String) -> bool:
+	if ip == "127.0.0.1" or ip == "::1" or ip.to_lower() == "localhost":
+		return true
+	for addr in IP.get_local_addresses():
+		if addr == ip:
+			return true
+	return false
+
 func start_stream(host_id: int, app_id: int):
 	var w = main.host_resolution.x
 	var h = main.host_resolution.y
 	if main.double_h:
 		w *= 2
-	main._log("[STREAM] Starting stream host_id=%d app_id=%d res=%dx%d@%d" % [host_id, app_id, w, h, main.stream_fps])
+
+	var ip = ""
+	for h_host in _b().get_hosts():
+		if h_host.get("id") == host_id:
+			ip = h_host.get("localaddress", "")
+			break
+
+	local_capture_mode = _is_local_host(ip)
+	if local_capture_mode:
+		main._log("[STREAM] Localhost detected! Enabling local capture mode (%s)" % ("Wayland" if OS.get_environment("WAYLAND_DISPLAY") else "X11"))
+		_b().set_local_capture_mode(true)
+		if _b()._v2 and _b()._v2.has_method("set_restore_token"):
+			_b()._v2.set_restore_token(main.pipewire_restore_token)
+	else:
+		_b().set_local_capture_mode(false)
+
+	main._log("[STREAM] Starting stream host_id=%d app_id=%d res=%dx%d@%d local=%s" % [host_id, app_id, w, h, main.stream_fps, str(local_capture_mode)])
 	if main.bitrate_idx >= 0:
 		bitrate = main.bitrates[main.bitrate_idx] * 1000
 	else:
 		bitrate = _auto_bitrate(w, h)
 	resize_stream_viewport(w, h)
 	var options = {}
-	options["width"] = w
-	options["height"] = h
-	options["fps"] = main.stream_fps
-	options["bitrate"] = bitrate
+	if local_capture_mode:
+		options["width"] = 320
+		options["height"] = 240
+		options["fps"] = 1
+		options["bitrate"] = 500
+	else:
+		options["width"] = w
+		options["height"] = h
+		options["fps"] = main.stream_fps
+		options["bitrate"] = bitrate
 	options["packet_size"] = 1024
 	options["streaming_remotely"] = 2
 	options["surroundAudioInfo"] = 0xCA0203
@@ -69,10 +100,16 @@ func _on_v2_launch_response(response: Dictionary):
 	var br = response.get("bitrate", 20000)
 
 	var stream_config = {}
-	stream_config["width"] = w
-	stream_config["height"] = h
-	stream_config["fps"] = fps
-	stream_config["bitrate"] = br
+	if local_capture_mode:
+		stream_config["width"] = 320
+		stream_config["height"] = 240
+		stream_config["fps"] = 1
+		stream_config["bitrate"] = 500
+	else:
+		stream_config["width"] = w
+		stream_config["height"] = h
+		stream_config["fps"] = fps
+		stream_config["bitrate"] = br
 	stream_config["packet_size"] = response.get("packet_size", 1024)
 	stream_config["streaming_remotely"] = response.get("streaming_remotely", 2)
 	stream_config["audio_configuration"] = response.get("audio_configuration", 0x0302CA)

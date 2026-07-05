@@ -19,6 +19,7 @@ class InputBridge;
 class PipeWireCapture;
 class DmaBufImporter;
 class PipeWireAudio;
+class X11Capture;
 
 class NightfallStream : public Node {
     GDCLASS(NightfallStream, Node);
@@ -129,6 +130,7 @@ private:
     PipeWireCapture *pipewire_capture_ = nullptr;
     DmaBufImporter *dmabuf_importer_ = nullptr;
     PipeWireAudio *pipewire_audio_ = nullptr;
+    X11Capture *x11_capture_ = nullptr;
 
     double stage_progress_ = 0.0;
     String current_stage_;
