@@ -27,6 +27,16 @@ void TextureUploader::setup_bgra(int width, int height) {
     current_width = width;
     current_height = height;
 
+    // Set shader params on main thread immediately so the ColorRect
+    // (which shares this material) sees BGRA mode before first frame renders.
+    if (shader_material.is_valid()) {
+        shader_material->set_shader_parameter("is_semi_planar", false);
+        shader_material->set_shader_parameter("is_nv12_rd", false);
+        shader_material->set_shader_parameter("color_matrix_type", 3);
+        shader_material->set_shader_parameter("color_range", 1);
+        shader_material->set_shader_parameter("swap_uv", false);
+    }
+
     RenderingServer *rs = RenderingServer::get_singleton();
     if (rs) {
         rs->call_on_render_thread(callable_mp(this, &TextureUploader::_render_thread_setup_bgra).bind(width, height));

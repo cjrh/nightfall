@@ -76,7 +76,12 @@ void NightfallStream::_process(double /*delta*/) {
         if (x11_capture_->get_latest_frame(frame) && frame.data) {
             Ref<TextureUploader> uploader = get_texture_uploader();
             if (uploader.is_valid()) {
-                uploader->setup_bgra(frame.width, frame.height);
+                static uint32_t last_w = 0, last_h = 0;
+                if (last_w != frame.width || last_h != frame.height) {
+                    last_w = frame.width;
+                    last_h = frame.height;
+                    uploader->setup_bgra(frame.width, frame.height);
+                }
                 // X11 SHM may have row padding (stride > width*4)
                 // Copy row-by-row if stride differs from width*4
                 uint32_t data_size = frame.width * frame.height * 4;
