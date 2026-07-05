@@ -31,6 +31,7 @@ public:
 
     void setup(int width, int height, int format, int colorspace, int color_range);
     void setup_bgra(int width, int height);
+    void ensure_shader_material();
     void cleanup();
     void update_from_frame(AVFrame *frame);
     void update_from_raw_nv12(int width, int height, const uint8_t *data, uint32_t y_size, uint32_t uv_size);

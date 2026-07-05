@@ -14,6 +14,20 @@ TextureUploader::~TextureUploader() {
     cleanup();
 }
 
+void TextureUploader::ensure_shader_material() {
+    if (shader_material.is_null()) {
+        yuv_shader.instantiate();
+        yuv_shader->set_code(YUV_SHADER_CODE);
+        shader_material.instantiate();
+        shader_material->set_shader(yuv_shader);
+        shader_material->set_shader_parameter("is_semi_planar", false);
+        shader_material->set_shader_parameter("is_nv12_rd", false);
+        shader_material->set_shader_parameter("color_matrix_type", 3);
+        shader_material->set_shader_parameter("color_range", 1);
+        shader_material->set_shader_parameter("swap_uv", false);
+    }
+}
+
 void TextureUploader::setup(int width, int height, int format, int colorspace, int color_range) {
     RenderingServer *rs = RenderingServer::get_singleton();
     if (rs) {

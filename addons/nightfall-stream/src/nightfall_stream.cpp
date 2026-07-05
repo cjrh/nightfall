@@ -134,13 +134,20 @@ void NightfallStream::start_stream(const String &host, const Dictionary &server_
     _reset_reconnect();
     emit_signal("state_changed", (int)state_);
 
-    // Don't propagate local_capture_mode to StreamConnection.
-    // The Sunshine stream must run normally so the decoder sets up the
-    // ShaderMaterial/texture pipeline. X11 capture frames override the
-    // texture content via setup_bgra() + update_from_raw_bgra().
+    // Set local_capture_mode so _cb_submit_decode_unit skips Sunshine frames
+    // (avoiding texture corruption from YUV/BGRA conflict).
+    // _cb_decoder_setup still runs normally to create the uploader's ShaderMaterial.
+    stream_connection_->set_local_capture_mode(local_capture_mode_);
     stream_connection_->start(host, server_info, stream_config, disable_hw);
 
     if (local_capture_mode_) {
+        // Ensure shader material exists on main thread so _setup_v2_yuv_rect()
+        // can access it immediately when the stream starts.
+        Ref<TextureUploader> uploader = get_texture_uploader();
+        if (uploader.is_valid()) {
+            uploader->ensure_shader_material();
+        }
+
         // Mute Sunshine audio - audio is already on the machine
         Ref<AudioRenderer> audio = get_audio_renderer();
         if (audio.is_valid()) {

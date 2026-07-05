@@ -167,12 +167,6 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     self->active_video_format_ = videoFormat;
     NF_LOG("StreamConnection", "Decoder setup: format=0x%x %dx%d@%dfps local_capture=%d", videoFormat, width, height, redrawRate, self->local_capture_mode_);
 
-    if (self->local_capture_mode_) {
-        NF_LOG("StreamConnection", "Local capture mode: skipping decoder and uploader setup for Sunshine stream");
-        self->decoder_ready_.store(true);
-        return 0;
-    }
-
     int ret = self->decoder_->setup(videoFormat, width, height, false);
     if (ret != 0) {
         NF_LOGE("StreamConnection", "Decoder setup FAILED: ret=%d", ret);
