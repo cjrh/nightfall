@@ -938,7 +938,9 @@ func _bind_yuv_textures():
 	var cr = mat.get_shader_parameter("color_range")
 	if tex_y:
 		var yuv_mode_val = 0
-		if is_nv12_rd:
+		if cmt == 3:
+			yuv_mode_val = 0
+		elif is_nv12_rd:
 			yuv_mode_val = 1
 		elif is_semi_planar:
 			yuv_mode_val = 2
