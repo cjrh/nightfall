@@ -17,6 +17,11 @@ uniform float convergence = 0.5;
 uniform float balance_shift = 0.5;
 
 vec3 yuv_to_rgb(vec2 uv) {
+	if (color_matrix_type == 3) {
+		// RGBA passthrough - data was converted from BGRA in C++
+		return texture(tex_y, uv).rgb;
+	}
+
 	float y_raw = texture(tex_y, uv).r;
 	float u_raw = 0.5;
 	float v_raw = 0.5;

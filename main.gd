@@ -938,9 +938,7 @@ func _bind_yuv_textures():
 	var cr = mat.get_shader_parameter("color_range")
 	if tex_y:
 		var yuv_mode_val = 0
-		if cmt == 3:
-			yuv_mode_val = 0
-		elif is_nv12_rd:
+		if is_nv12_rd:
 			yuv_mode_val = 1
 		elif is_semi_planar:
 			yuv_mode_val = 2
@@ -974,8 +972,6 @@ func _bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode: int, cmt, cr):
 		mat.set_shader_parameter("yuv_mode", yuv_mode)
 		mat.set_shader_parameter("color_matrix_type", cmt)
 		mat.set_shader_parameter("color_range", cr)
-		if yuv_mode == 0:
-			mat.set_shader_parameter("main_texture", stream_viewport.get_texture())
 	_log("[COMP] YUV textures bound to composition layer shader (mode=%d)" % yuv_mode)
 
 func _bind_comp_fallback_texture(stream_tex):
@@ -998,7 +994,7 @@ func _on_stream_started():
 	welcome_screen.reset_connect_button()
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = true
 	_log("[STREAM] Connection started!")
-	if not use_comp_layer or stream_manager.local_capture_mode:
+	if not use_comp_layer:
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	stream_manager.bind_texture()
