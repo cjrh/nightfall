@@ -974,6 +974,8 @@ func _bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode: int, cmt, cr):
 		mat.set_shader_parameter("yuv_mode", yuv_mode)
 		mat.set_shader_parameter("color_matrix_type", cmt)
 		mat.set_shader_parameter("color_range", cr)
+		if yuv_mode == 0:
+			mat.set_shader_parameter("main_texture", stream_viewport.get_texture())
 	_log("[COMP] YUV textures bound to composition layer shader (mode=%d)" % yuv_mode)
 
 func _bind_comp_fallback_texture(stream_tex):
