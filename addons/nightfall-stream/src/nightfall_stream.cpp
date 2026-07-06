@@ -19,6 +19,7 @@
 
 using namespace godot;
 
+#ifdef NIGHTFALL_HAS_X11
 static bool is_wayland() {
     const char *xdg = getenv("XDG_SESSION_TYPE");
     if (xdg && strcmp(xdg, "wayland") == 0) return true;
@@ -26,6 +27,7 @@ static bool is_wayland() {
     if (wl && wl[0]) return true;
     return false;
 }
+#endif
 
 NightfallStream::NightfallStream() {}
 
