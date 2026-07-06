@@ -1584,15 +1584,6 @@ func _process(delta):
 
 	if is_streaming:
 		if use_comp_layer:
-			var need_bind = false
-			if comp_shader_mat and comp_shader_mat.get_shader_parameter("yuv_mode") == 0:
-				need_bind = true
-			if comp_shader_mat_left and comp_shader_mat_left.get_shader_parameter("yuv_mode") == 0:
-				need_bind = true
-			if comp_shader_mat_right and comp_shader_mat_right.get_shader_parameter("yuv_mode") == 0:
-				need_bind = true
-			if need_bind:
-				_bind_yuv_textures()
 			var cur_filter = smooth_mode
 			var cur_sharpen = float(sharpen_mode) * 0.5
 			var cur_blur_scale = float(host_resolution.x) / float(_xr_render_width) if _xr_render_width > 0 else 1.0
