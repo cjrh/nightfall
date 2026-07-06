@@ -192,8 +192,8 @@ var _ui_saved_mat: Material = null
 var _kb_saved_mat: Material = null
 
 var _log_lines: PackedStringArray = []
-var _ui_viewport_size := Vector2i(520, 290)
-var _ui_mesh_size := Vector2(1.04, 0.58)
+var _ui_viewport_size := Vector2i(600, 290)
+var _ui_mesh_size := Vector2(1.20, 0.58)
 var _ui_host_label: Label
 var _ui_status_label: Label
 var _ui_pt_btn: Button
