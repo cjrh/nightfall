@@ -18,8 +18,7 @@ void fragment() {
 	if (color_matrix_type == 3) {
 		// RGBA passthrough - data was already converted from BGRA in C++
 		COLOR = texture(tex_y, UV);
-		return;
-	}
+	} else {
 
 	float y_raw = texture(tex_y, UV).r;
 	float u_raw = 0.5;
@@ -81,5 +80,6 @@ void fragment() {
 	}
 
 	COLOR = vec4(rgb, 1.0);
+	}
 }
 )";
