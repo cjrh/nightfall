@@ -16,8 +16,8 @@ uniform bool swap_uv;
 
 void fragment() {
 	if (color_matrix_type == 3) {
-		vec4 bgra = texture(tex_y, UV);
-		COLOR = vec4(bgra.b, bgra.g, bgra.r, 1.0);
+		// RGBA passthrough - data was already converted from BGRA in C++
+		COLOR = texture(tex_y, UV);
 		return;
 	}
 
