@@ -998,7 +998,7 @@ func _on_stream_started():
 	welcome_screen.reset_connect_button()
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = true
 	_log("[STREAM] Connection started!")
-	if not use_comp_layer:
+	if not use_comp_layer or local_capture_mode:
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	stream_manager.bind_texture()
