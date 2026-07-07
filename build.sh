@@ -27,7 +27,7 @@ for arg in "$@"; do
   esac
 done
 
-GODOT="/var/home/tyrone/Applications/Godot_v4.7-stable_linux.x86_64"
+GODOT="/var/home/tyrone/Applications/Godot_v4.7-beta2_linux.x86_64"
 JAVA_HOME="/home/linuxbrew/.linuxbrew/opt/openjdk@17"
 TEMPLATES="/var/home/tyrone/.local/share/godot/export_templates/4.7.stable/android_source.zip"
 LINUX_TEMPLATE_DEBUG="/var/home/tyrone/.local/share/godot/export_templates/4.7.stable/linux_debug.x86_64"
