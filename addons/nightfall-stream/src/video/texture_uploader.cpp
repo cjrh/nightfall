@@ -19,6 +19,67 @@ void TextureUploader::set_active(bool nv12) {
     is_nv12 = nv12;
 }
 
+void TextureUploader::set_texture_from_native_rid(RID p_tex_rid, int p_width, int p_height) {
+    // Replaces the texture pipeline with a pre-existing GPU texture.
+    // Used for zero-copy AHardwareBuffer import where the texture
+    // is already on the GPU with YCbCr hardware conversion.
+    use_shader_conversion = true;
+    is_nv12 = false; // Single combined texture, not separate Y/UV planes
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    if (!rs) return;
+
+    // Queue render thread setup to replace textures
+    rs->call_on_render_thread(callable_mp(this, &TextureUploader::_render_thread_import_native).bind(p_tex_rid, p_width, p_height));
+}
+
+void TextureUploader::_render_thread_import_native(RID p_tex_rid, int p_width, int p_height) {
+    std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    rd = rs ? rs->get_rendering_device() : nullptr;
+
+    if (!rd) return;
+
+    // Free any existing textures
+    for (int i = 0; i < 3; i++) {
+        rd_texture_wrappers[i].unref();
+        if (rs_texture_rid[i].is_valid()) {
+            rs->free_rid(rs_texture_rid[i]);
+            rs_texture_rid[i] = RID();
+        }
+        if (rd_texture_rid[i].is_valid() && rd_texture_rid[i] != p_tex_rid) {
+            rd->free_rid(rd_texture_rid[i]);
+            rd_texture_rid[i] = RID();
+        }
+    }
+
+    // Use the imported texture directly
+    rd_texture_rid[0] = p_tex_rid;
+    rs_texture_rid[0] = rs->texture_rd_create(p_tex_rid);
+
+    if (rd_texture_wrappers[0].is_null())
+        rd_texture_wrappers[0].instantiate();
+    rd_texture_wrappers[0]->set_texture_rd_rid(p_tex_rid);
+
+    // Set shader to passthrough mode (YCbCr conversion is done by hardware sampler)
+    ensure_shader_material();
+    if (shader_material.is_valid()) {
+        shader_material->set_shader_parameter("tex_y", rd_texture_wrappers[0]);
+        shader_material->set_shader_parameter("is_semi_planar", false);
+        shader_material->set_shader_parameter("is_nv12_rd", false);
+        shader_material->set_shader_parameter("color_matrix_type", 3); // Passthrough
+        shader_material->set_shader_parameter("color_range", 1);
+        shader_material->set_shader_parameter("swap_uv", false);
+    }
+
+    // Mark new frame available immediately (texture is already on GPU, no upload needed)
+    new_frame_available_.store(true);
+
+    current_width = p_width;
+    current_height = p_height;
+}
+
 void TextureUploader::ensure_shader_material() {
     if (shader_material.is_null()) {
         yuv_shader.instantiate();

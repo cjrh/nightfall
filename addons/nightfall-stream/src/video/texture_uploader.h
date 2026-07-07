@@ -33,6 +33,7 @@ public:
     void setup_bgra(int width, int height);
     void ensure_shader_material();
     void set_active(bool nv12); // Main-thread flags for shader conversion + NV12 mode
+    void set_texture_from_native_rid(RID p_tex_rid, int p_width, int p_height); // Zero-copy GPU texture import
     void cleanup();
     void update_from_frame(AVFrame *frame);
     void update_from_raw_nv12(int width, int height, const uint8_t *data, uint32_t y_size, uint32_t uv_size);
@@ -49,6 +50,7 @@ protected:
 private:
     void _render_thread_setup(int width, int height, int format, int colorspace, int color_range);
     void _render_thread_setup_bgra(int width, int height);
+    void _render_thread_import_native(RID p_tex_rid, int p_width, int p_height);
     void _render_thread_cleanup();
 
     RenderingDevice *rd = nullptr;

@@ -678,10 +678,11 @@ void StreamConnection::_decode_thread_func() {
                 if (tmp->hw_frames_ctx) {
                     sw_frame = av_frame_alloc();
 
-                    // Try AHardwareBuffer zero-copy path (Android only).
-                    // Uses AHardwareBuffer_lock to get CPU-mapped GPU memory pointers,
-                    // feeding directly into update_from_raw_nv12(). This eliminates
-                    // the av_hwframe_transfer_data() GPU driver copy.
+                    // Try AHardwareBuffer paths (Android only).
+                    // Tier 1: True GPU-only via texture_create_from_android_hardware_buffer()
+                    //         (custom Godot build with YCbCr sampler). Zero CPU copies.
+                    // Tier 2: AHardwareBuffer_lock to get CPU-mapped GPU memory,
+                    //         feeding update_from_raw_nv12(). Eliminates driver copy.
                     bool used_ahb = false;
 #ifdef __ANDROID__
                     if (!used_ahb && decoder_->get_codec_context()) {
@@ -693,68 +694,80 @@ void StreamConnection::_decode_thread_func() {
                             if (ahb) {
                                 AHardwareBuffer_Desc desc;
                                 AHardwareBuffer_describe(ahb, &desc);
+                                int w = desc.width;
+                                int h = desc.height;
 
-                                void *mapped = nullptr;
-                                int lock_ret = AHardwareBuffer_lock(ahb,
-                                    AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &mapped);
-                                if (lock_ret == 0 && mapped) {
-                                    // Ensure uploader is ready for NV12
-                                    uploader_->ensure_shader_material();
-                                    uploader_->set_active(true); // NV12 mode
-                                    int w = desc.width;
-                                    int h = desc.height;
-                                    int y_stride = desc.stride; // Y plane stride
-                                    int y_size = y_stride * h;
-                                    int uv_size = y_stride * (h / 2);
+                                RenderingDevice *rd = RenderingServer::get_singleton()
+                                    ? RenderingServer::get_singleton()->get_rendering_device()
+                                    : nullptr;
 
-                                    // Upload AHB data using CPU-mapped GPU memory (AHardwareBuffer_lock).
-                                    // True GPU-only path via texture_create_from_android_hardware_buffer()
-                                    // is available in custom Godot builds but needs uploader/shader changes
-                                    // for single-texture YCbCr sampling. For now, AHB_lock gives GPU-mapped CPU
-                                    // access without the av_hwframe_transfer_data driver copy.
+                                // Tier 1: True GPU-only path (custom Godot build)
+                                if (rd && rd->has_method("texture_create_from_android_hardware_buffer")) {
+                                    int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT);
+                                    Variant tex_rid_var = rd->call("texture_create_from_android_hardware_buffer",
+                                        (uint64_t)ahb, (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM, w, h, usage);
+                                    RID tex_rid = tex_rid_var;
+                                    if (tex_rid.is_valid()) {
+                                        uploader_->ensure_shader_material();
+                                        uploader_->set_texture_from_native_rid(tex_rid, w, h);
+                                        used_ahb = true;
 
-                                    // NV12: Y plane followed by interleaved UV plane
-                                    if (y_stride == w) {
-                                        // No padding, use directly
-                                        uploader_->update_from_raw_nv12(w, h,
-                                            (const uint8_t *)mapped, y_size, uv_size);
-                                    } else {
-                                        // Padding present, copy row-by-row
-                                        std::vector<uint8_t> nv12(y_size + uv_size);
-                                        for (int y = 0; y < h; y++)
-                                            memcpy(nv12.data() + y * w,
-                                                   (uint8_t *)mapped + y * y_stride, w);
-                                        for (int y = 0; y < h / 2; y++)
-                                            memcpy(nv12.data() + y_size + y * w,
-                                                   (uint8_t *)mapped + y_size + y * y_stride, w);
-                                        uploader_->update_from_raw_nv12(w, h,
-                                            nv12.data(), w * h, w * (h / 2));
+                                        static int tier1_logged = 0;
+                                        if (++tier1_logged <= 3) {
+                                            NF_LOG("StreamConnection", "Tier 1 GPU-only: %dx%d via texture_create_from_android_hardware_buffer", w, h);
+                                        }
                                     }
-
-                                    static int ahb_logged = 0;
-                                    if (++ahb_logged <= 3) {
-                                        NF_LOG("StreamConnection", "AHB frame uploaded! %dx%d stride=%d",
-                                               w, h, y_stride);
-                                    }
-                                    used_ahb = true;
-                                    AHardwareBuffer_unlock(ahb, nullptr);
-
-                                    // Resolve colorspace from frame
-                                    AVColorSpace frame_cs = _resolve_frame_colorspace(tmp);
-                                    AVColorRange frame_cr = (AVColorRange)tmp->color_range;
-                                    if (frame_cs != current_colorspace_ || frame_cr != current_color_range_) {
-                                        current_colorspace_ = frame_cs;
-                                        current_color_range_ = frame_cr;
-                                        uploader_->update_colorspace((int)frame_cs, (int)frame_cr);
-                                    }
+                                    AHardwareBuffer_release(ahb);
                                 } else {
-                                    // Lock failed - fall back to av_hwframe_map/transfer
-                                    static int lock_fail_logged = 0;
-                                    if (++lock_fail_logged <= 3) {
-                                        NF_LOG("StreamConnection", "AHardwareBuffer_lock failed: %d", lock_ret);
+                                    // Tier 2: AHardwareBuffer_lock (CPU-mapped GPU memory)
+                                    void *mapped = nullptr;
+                                    int lock_ret = AHardwareBuffer_lock(ahb,
+                                        AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &mapped);
+                                    if (lock_ret == 0 && mapped) {
+                                        uploader_->ensure_shader_material();
+                                        uploader_->set_active(true); // NV12 mode
+                                        int y_stride = desc.stride;
+                                        int y_size = y_stride * h;
+                                        int uv_size = y_stride * (h / 2);
+
+                                        if (y_stride == w) {
+                                            uploader_->update_from_raw_nv12(w, h,
+                                                (const uint8_t *)mapped, y_size, uv_size);
+                                        } else {
+                                            std::vector<uint8_t> nv12(y_size + uv_size);
+                                            for (int y = 0; y < h; y++)
+                                                memcpy(nv12.data() + y * w,
+                                                       (uint8_t *)mapped + y * y_stride, w);
+                                            for (int y = 0; y < h / 2; y++)
+                                                memcpy(nv12.data() + y_size + y * w,
+                                                       (uint8_t *)mapped + y_size + y * y_stride, w);
+                                            uploader_->update_from_raw_nv12(w, h,
+                                                nv12.data(), w * h, w * (h / 2));
+                                        }
+
+                                        static int tier2_logged = 0;
+                                        if (++tier2_logged <= 3) {
+                                            NF_LOG("StreamConnection", "Tier 2 AHB_lock: %dx%d stride=%d", w, h, y_stride);
+                                        }
+                                        used_ahb = true;
+                                        AHardwareBuffer_unlock(ahb, nullptr);
+
+                                        // Resolve colorspace from frame
+                                        AVColorSpace frame_cs = _resolve_frame_colorspace(tmp);
+                                        AVColorRange frame_cr = (AVColorRange)tmp->color_range;
+                                        if (frame_cs != current_colorspace_ || frame_cr != current_color_range_) {
+                                            current_colorspace_ = frame_cs;
+                                            current_color_range_ = frame_cr;
+                                            uploader_->update_colorspace((int)frame_cs, (int)frame_cr);
+                                        }
+                                    } else {
+                                        static int lock_fail_logged = 0;
+                                        if (++lock_fail_logged <= 3) {
+                                            NF_LOG("StreamConnection", "AHardwareBuffer_lock failed: %d", lock_ret);
+                                        }
                                     }
+                                    AHardwareBuffer_release(ahb);
                                 }
-                                AHardwareBuffer_release(ahb);
                             }
                         }
                     }
