@@ -671,7 +671,14 @@ void StreamConnection::_decode_thread_func() {
                 AVFrame *sw_frame = nullptr;
                 if (tmp->hw_frames_ctx) {
                     sw_frame = av_frame_alloc();
-                    int transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+
+                    // Try av_hwframe_map first (potential zero-copy on Adreno GPUs
+                    // where AHardwareBuffer memory is CPU-mappable). Falls back to
+                    // av_hwframe_transfer_data (full copy) if mapping fails.
+                    int transfer_ret = av_hwframe_map(sw_frame, tmp, AV_HWFRAME_MAP_READ);
+                    if (transfer_ret < 0) {
+                        transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+                    }
                     if (transfer_ret >= 0) {
                         av_frame_copy_props(sw_frame, tmp);
                         final_frame = sw_frame;
