@@ -240,6 +240,12 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
     AVDictionary *opts = nullptr;
     if (is_mediacodec) {
         av_dict_set(&opts, "ndk_codec", "1", 0);
+
+        // Create ImageReader for Surface output mode. Skip during probe
+        // (width <= 1280) to avoid GPU resource conflicts with Godot init.
+        if (width > 1280) {
+            create_image_reader(width, height);
+        }
     }
 
     if (is_mediacodec && ctx->codec_id == AV_CODEC_ID_H264 && !ctx->extradata) {
