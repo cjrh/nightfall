@@ -14,6 +14,11 @@ TextureUploader::~TextureUploader() {
     cleanup();
 }
 
+void TextureUploader::set_active(bool nv12) {
+    use_shader_conversion = true;
+    is_nv12 = nv12;
+}
+
 void TextureUploader::ensure_shader_material() {
     if (shader_material.is_null()) {
         yuv_shader.instantiate();

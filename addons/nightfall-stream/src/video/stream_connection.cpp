@@ -679,8 +679,9 @@ void StreamConnection::_decode_thread_func() {
                     sw_frame = av_frame_alloc();
 
                     // Try AHardwareBuffer zero-copy path (Android only).
-                    // Requires custom Godot build with texture_create_from_android_hardware_buffer().
-                    // Falls back to av_hwframe_map/transfer if AHB not available.
+                    // Uses AHardwareBuffer_lock to get CPU-mapped GPU memory pointers,
+                    // feeding directly into update_from_raw_nv12(). This eliminates
+                    // the av_hwframe_transfer_data() GPU driver copy.
                     bool used_ahb = false;
 #ifdef __ANDROID__
                     if (!used_ahb && decoder_->get_codec_context()) {
@@ -690,17 +691,65 @@ void StreamConnection::_decode_thread_func() {
                         if (codec_obj && buf_idx >= 0) {
                             AHardwareBuffer *ahb = mediacodec_get_ahb(codec_obj, buf_idx);
                             if (ahb) {
-                                RenderingDevice *rd_ahb = RenderingServer::get_singleton()
-                                    ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
-                                if (rd_ahb && rd_ahb->has_method("texture_create_from_android_hardware_buffer")) {
-                                    // TODO: Upload AHB directly via Godot API
-                                    // RID tex = rd_ahb->call("texture_create_from_android_hardware_buffer", ...)
-                                    // For now, just log that zero-copy path is available
+                                AHardwareBuffer_Desc desc;
+                                AHardwareBuffer_describe(ahb, &desc);
+
+                                void *mapped = nullptr;
+                                int lock_ret = AHardwareBuffer_lock(ahb,
+                                    AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &mapped);
+                                if (lock_ret == 0 && mapped) {
+                                    int w = desc.width;
+                                    int h = desc.height;
+                                    int y_stride = desc.stride; // Y plane stride
+                                    int y_size = y_stride * h;
+                                    int uv_size = y_stride * (h / 2);
+
+                                    // Ensure uploader is configured for NV12.
+                                    // The decoder setup may not have completed on the render
+                                    // thread yet, so set main-thread flags explicitly.
+                                    uploader_->ensure_shader_material();
+                                    uploader_->set_active(true); // NV12 mode
+
+                                    // NV12: Y plane followed by interleaved UV plane
+                                    if (y_stride == w) {
+                                        // No padding, use directly
+                                        uploader_->update_from_raw_nv12(w, h,
+                                            (const uint8_t *)mapped, y_size, uv_size);
+                                    } else {
+                                        // Padding present, copy row-by-row
+                                        std::vector<uint8_t> nv12(y_size + uv_size);
+                                        for (int y = 0; y < h; y++)
+                                            memcpy(nv12.data() + y * w,
+                                                   (uint8_t *)mapped + y * y_stride, w);
+                                        for (int y = 0; y < h / 2; y++)
+                                            memcpy(nv12.data() + y_size + y * w,
+                                                   (uint8_t *)mapped + y_size + y * y_stride, w);
+                                        uploader_->update_from_raw_nv12(w, h,
+                                            nv12.data(), w * h, w * (h / 2));
+                                    }
+
                                     static int ahb_logged = 0;
                                     if (++ahb_logged <= 3) {
-                                        NF_LOG("StreamConnection", "AHardwareBuffer available for zero-copy upload!");
+                                        NF_LOG("StreamConnection", "AHB frame uploaded! %dx%d stride=%d",
+                                               w, h, y_stride);
                                     }
-                                    used_ahb = true; // TODO: remove when upload is implemented
+                                    used_ahb = true;
+                                    AHardwareBuffer_unlock(ahb, nullptr);
+
+                                    // Resolve colorspace from frame
+                                    AVColorSpace frame_cs = _resolve_frame_colorspace(tmp);
+                                    AVColorRange frame_cr = (AVColorRange)tmp->color_range;
+                                    if (frame_cs != current_colorspace_ || frame_cr != current_color_range_) {
+                                        current_colorspace_ = frame_cs;
+                                        current_color_range_ = frame_cr;
+                                        uploader_->update_colorspace((int)frame_cs, (int)frame_cr);
+                                    }
+                                } else {
+                                    // Lock failed - fall back to av_hwframe_map/transfer
+                                    static int lock_fail_logged = 0;
+                                    if (++lock_fail_logged <= 3) {
+                                        NF_LOG("StreamConnection", "AHardwareBuffer_lock failed: %d", lock_ret);
+                                    }
                                 }
                                 AHardwareBuffer_release(ahb);
                             }
