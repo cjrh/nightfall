@@ -8,6 +8,7 @@
 #include <dlfcn.h>
 #include <jni.h>
 #include <android/hardware_buffer.h>
+#include <android/hardware_buffer_jni.h>
 extern "C" {
 #include <libavcodec/jni.h>
 }
