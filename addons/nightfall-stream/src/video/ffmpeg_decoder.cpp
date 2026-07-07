@@ -9,6 +9,8 @@
 #include <jni.h>
 #include <android/hardware_buffer.h>
 #include <android/hardware_buffer_jni.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 extern "C" {
 #include <libavcodec/jni.h>
 #include <libavcodec/mediacodec.h>
@@ -259,12 +261,15 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
                     jobject surface = env->NewObject(cls_surface, surf_ctor, surfacetex);
                     NF_LOG("FfmpegDecoder", "Surface created: %p", (void*)surface);
                     if (surface) {
+                        // FFmpeg's JNI wrapper expects an ANativeWindow*, not a raw jobject.
+                        // ANativeWindow_fromSurface converts the Java Surface to the native type.
+                        ANativeWindow *native_window = ANativeWindow_fromSurface(env, surface);
                         AVMediaCodecContext *mc_ctx = av_mediacodec_alloc_context();
-                        mc_ctx->surface = env->NewGlobalRef(surface);
+                        mc_ctx->surface = native_window;
                         av_mediacodec_default_init(ctx, mc_ctx, mc_ctx->surface);
                         ctx->hwaccel_context = mc_ctx;
-                        NF_LOG("FfmpegDecoder", "MediaCodec Surface configured: surface=%p mc_ctx=%p hwaccel_context=%p",
-                               mc_ctx->surface, (void*)mc_ctx, (void*)ctx->hwaccel_context);
+                        NF_LOG("FfmpegDecoder", "MediaCodec Surface configured: native_window=%p mc_ctx=%p",
+                               (void*)native_window, (void*)mc_ctx);
                         env->DeleteLocalRef(surface);
                     }
                     env->DeleteLocalRef(surfacetex);
