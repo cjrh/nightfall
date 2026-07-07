@@ -1,5 +1,5 @@
 diff --git a/drivers/vulkan/rendering_device_driver_vulkan.cpp b/drivers/vulkan/rendering_device_driver_vulkan.cpp
-index 4b1bd9f..2bfa198 100644
+index 4b1bd9f..6b1a564 100644
 --- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
 +++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
 @@ -582,6 +582,9 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
@@ -12,7 +12,7 @@ index 4b1bd9f..2bfa198 100644
  	_register_requested_device_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, false);
  	_register_requested_device_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, false);
  	_register_requested_device_extension(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME, false);
-@@ -2479,6 +2482,106 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
+@@ -2479,6 +2482,157 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
  	return TextureID(tex_info);
  }
  
@@ -81,6 +81,57 @@ index 4b1bd9f..2bfa198 100644
 +		ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkCreateImage from AHardwareBuffer failed: %d", err));
 +	}
 +
++	// Import the AHB memory and bind to the image
++	{
++		VkMemoryRequirements mem_req;
++		vkGetImageMemoryRequirements(vk_device, vk_image, &mem_req);
++
++		VkImportAndroidHardwareBufferInfoANDROID import_info = {};
++		import_info.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
++		import_info.buffer = hb;
++
++		VkMemoryAllocateInfo alloc_info = {};
++		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
++		alloc_info.pNext = &import_info;
++		alloc_info.allocationSize = mem_req.size;
++
++		// Find a memory type that supports the image
++		VkPhysicalDeviceMemoryProperties mem_props;
++		vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
++		uint32_t mem_type_idx = UINT32_MAX;
++		for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
++			if ((mem_req.memoryTypeBits & (1u << i)) &&
++			    (mem_props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
++				mem_type_idx = i;
++				break;
++			}
++		}
++		if (mem_type_idx == UINT32_MAX) {
++			vkDestroyImage(vk_device, vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
++			vkDestroySamplerYcbcrConversion(vk_device, ycbcr_conversion, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION));
++			ERR_FAIL_COND_V_MSG(true, TextureID(), "No suitable memory type for AHB import");
++		}
++		alloc_info.memoryTypeIndex = mem_type_idx;
++
++		VkDeviceMemory memory = VK_NULL_HANDLE;
++		err = vkAllocateMemory(vk_device, &alloc_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE_MEMORY), &memory);
++		if (err) {
++			vkDestroyImage(vk_device, vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
++			vkDestroySamplerYcbcrConversion(vk_device, ycbcr_conversion, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION));
++			ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkAllocateMemory for AHB failed: %d", err));
++		}
++
++		err = vkBindImageMemory(vk_device, vk_image, memory, 0);
++		if (err) {
++			vkFreeMemory(vk_device, memory, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE_MEMORY));
++			vkDestroyImage(vk_device, vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
++			vkDestroySamplerYcbcrConversion(vk_device, ycbcr_conversion, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION));
++			ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkBindImageMemory for AHB failed: %d", err));
++		}
++
++		// Memory will be freed when the VkDevice is destroyed.
++	}
++
 +	// Create image view with VK_FORMAT_UNDEFINED to match the external format image.
 +	// texture_create_from_extension would use the passed p_format which doesn't match.
 +	VkImageViewCreateInfo view_ci = {};
@@ -119,7 +170,7 @@ index 4b1bd9f..2bfa198 100644
  RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared(TextureID p_original_texture, const TextureView &p_view) {
  	const TextureInfo *owner_tex_info = (const TextureInfo *)p_original_texture.id;
  #ifdef DEBUG_ENABLED
-@@ -2592,6 +2695,16 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
+@@ -2592,6 +2746,16 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
  void RenderingDeviceDriverVulkan::texture_free(TextureID p_texture) {
  	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
  	vkDestroyImageView(vk_device, tex_info->vk_view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW));
@@ -136,7 +187,7 @@ index 4b1bd9f..2bfa198 100644
  	if (tex_info->allocation.handle) {
  		if (!Engine::get_singleton()->is_extra_gpu_memory_tracking_enabled()) {
  			vmaDestroyImage(allocator, tex_info->vk_view_create_info.image, tex_info->allocation.handle);
-@@ -4704,25 +4817,54 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
+@@ -4704,25 +4868,54 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
  					vk_writes[writes_amount].pImageInfo = vk_img_infos;
  				}
  			} break;
