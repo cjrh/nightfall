@@ -203,8 +203,10 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
 
 #ifdef __ANDROID__
     // Create native MediaCodec with ImageReader for zero-copy GPU decode.
-    // This replaces FFmpeg's hevc_mediacodec which only does ByteBuffer output.
-    if (videoFormat & VIDEO_FORMAT_MASK_H265) {
+    // Only activate when the custom Godot engine with the AHB import API is present.
+    RenderingDevice *rd = RenderingServer::get_singleton()
+        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    if ((videoFormat & VIDEO_FORMAT_MASK_H265) && rd && rd->has_method("texture_create_from_android_hardware_buffer")) {
         self->native_codec_ = new AndroidMediaCodec();
         if (self->native_codec_->init("video/hevc", width, height)) {
             NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
