@@ -228,7 +228,7 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
 
     AVDictionary *opts = nullptr;
     if (is_mediacodec) {
-        av_dict_set(&opts, "ndk_codec", "1", 0);
+        av_dict_set(&opts, "ndk_codec", "0", 0);
     }
 
     if (is_mediacodec && ctx->codec_id == AV_CODEC_ID_H264 && !ctx->extradata) {
