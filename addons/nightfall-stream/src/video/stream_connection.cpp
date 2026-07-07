@@ -5,6 +5,12 @@
 #include "input/input_bridge.h"
 #include "video/depth_bridge.h"
 #include "video/codec_defs.h"
+#ifdef __ANDROID__
+#include "video/mediacodec_internal.h"
+#include <jni.h>
+#include <android/hardware_buffer.h>
+AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
+#endif
 
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -672,19 +678,50 @@ void StreamConnection::_decode_thread_func() {
                 if (tmp->hw_frames_ctx) {
                     sw_frame = av_frame_alloc();
 
-                    // Try av_hwframe_map first (potential zero-copy on Adreno GPUs
-                    // where AHardwareBuffer memory is CPU-mappable). Falls back to
-                    // av_hwframe_transfer_data (full copy) if mapping fails.
-                    int transfer_ret = av_hwframe_map(sw_frame, tmp, AV_HWFRAME_MAP_READ);
-                    if (transfer_ret < 0) {
-                        transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+                    // Try AHardwareBuffer zero-copy path (Android only).
+                    // Requires custom Godot build with texture_create_from_android_hardware_buffer().
+                    // Falls back to av_hwframe_map/transfer if AHB not available.
+                    bool used_ahb = false;
+#ifdef __ANDROID__
+                    if (!used_ahb && decoder_->get_codec_context()) {
+                        jobject codec_obj = (jobject)mediacodec_get_codec_object(
+                            decoder_->get_codec_context());
+                        ssize_t buf_idx = mediacodec_get_buffer_index(tmp);
+                        if (codec_obj && buf_idx >= 0) {
+                            AHardwareBuffer *ahb = mediacodec_get_ahb(codec_obj, buf_idx);
+                            if (ahb) {
+                                RenderingDevice *rd_ahb = RenderingServer::get_singleton()
+                                    ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+                                if (rd_ahb && rd_ahb->has_method("texture_create_from_android_hardware_buffer")) {
+                                    // TODO: Upload AHB directly via Godot API
+                                    // RID tex = rd_ahb->call("texture_create_from_android_hardware_buffer", ...)
+                                    // For now, just log that zero-copy path is available
+                                    static int ahb_logged = 0;
+                                    if (++ahb_logged <= 3) {
+                                        NF_LOG("StreamConnection", "AHardwareBuffer available for zero-copy upload!");
+                                    }
+                                    used_ahb = true; // TODO: remove when upload is implemented
+                                }
+                                AHardwareBuffer_release(ahb);
+                            }
+                        }
                     }
-                    if (transfer_ret >= 0) {
-                        av_frame_copy_props(sw_frame, tmp);
-                        final_frame = sw_frame;
-                    } else {
-                        av_frame_free(&sw_frame);
-                        sw_frame = nullptr;
+#endif
+                    if (!used_ahb) {
+                        // Try av_hwframe_map first (potential zero-copy on Adreno GPUs
+                        // where AHardwareBuffer memory is CPU-mappable). Falls back to
+                        // av_hwframe_transfer_data (full copy) if mapping fails.
+                        int transfer_ret = av_hwframe_map(sw_frame, tmp, AV_HWFRAME_MAP_READ);
+                        if (transfer_ret < 0) {
+                            transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+                        }
+                        if (transfer_ret >= 0) {
+                            av_frame_copy_props(sw_frame, tmp);
+                            final_frame = sw_frame;
+                        } else {
+                            av_frame_free(&sw_frame);
+                            sw_frame = nullptr;
+                        }
                     }
                 }
 
