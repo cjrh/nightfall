@@ -25,6 +25,9 @@ class FfmpegDecoder;
 class TextureUploader;
 class AudioRenderer;
 class InputBridge;
+#ifdef __ANDROID__
+class AndroidMediaCodec;
+#endif
 
 class StreamConnection : public Node {
     GDCLASS(StreamConnection, Node);
@@ -139,6 +142,9 @@ private:
     AVColorSpace current_colorspace_ = AVCOL_SPC_BT709;
     AVColorRange current_color_range_ = AVCOL_RANGE_UNSPECIFIED;
     bool local_capture_mode_ = false;
+#ifdef __ANDROID__
+    AndroidMediaCodec *native_codec_ = nullptr;
+#endif
 };
 
 } // namespace godot

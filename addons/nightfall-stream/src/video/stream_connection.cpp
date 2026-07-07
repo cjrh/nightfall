@@ -7,6 +7,14 @@
 #include "video/codec_defs.h"
 #ifdef __ANDROID__
 #include "video/mediacodec_internal.h"
+#include "video/mediacodec_native.h"
+#include <jni.h>
+#include <android/hardware_buffer.h>
+#include <media/NdkImageReader.h>
+AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
+#endif
+#ifdef __ANDROID__
+#include "video/mediacodec_internal.h"
 #include <jni.h>
 #include <android/hardware_buffer.h>
 AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
@@ -193,6 +201,21 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
            self->decoder_->is_hw_decode() ? "yes" : "no",
            self->decoder_->is_raw_decode() ? "yes" : "no");
 
+#ifdef __ANDROID__
+    // Create native MediaCodec with ImageReader for zero-copy GPU decode.
+    // This replaces FFmpeg's hevc_mediacodec which only does ByteBuffer output.
+    if (videoFormat & VIDEO_FORMAT_MASK_H265) {
+        self->native_codec_ = new AndroidMediaCodec();
+        if (self->native_codec_->init("video/hevc", width, height)) {
+            NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
+        } else {
+            NF_LOGE("StreamConnection", "Native MediaCodec init failed, falling back to FFmpeg");
+            delete self->native_codec_;
+            self->native_codec_ = nullptr;
+        }
+    }
+#endif
+
     int pix_fmt = AV_PIX_FMT_YUV420P;
     if (self->decoder_->is_raw_decode()) {
         pix_fmt = AV_PIX_FMT_NV12;
@@ -230,6 +253,13 @@ void StreamConnection::_cb_decoder_cleanup() {
             self->decoder_->cleanup();
             self->uploader_->cleanup();
         }
+#ifdef __ANDROID__
+        if (self->native_codec_) {
+            self->native_codec_->shutdown();
+            delete self->native_codec_;
+            self->native_codec_ = nullptr;
+        }
+#endif
         self->decoder_ready_.store(false);
         self->h264_hw_upgrade_pending_.store(false);
         self->h264_hw_upgraded_.store(false);
@@ -546,6 +576,50 @@ void StreamConnection::_decode_thread_func() {
         }
 
         if (!pkt) continue;
+
+#ifdef __ANDROID__
+        if (native_codec_) {
+            // Native MediaCodec path: feed raw packet data, get AHB frames
+            int send_ret = native_codec_->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
+            av_packet_free(&pkt);
+            if (!send_ret) continue;
+
+            // Try to dequeue frames
+            NativeDecodedFrame frame;
+            while (native_codec_->dequeue_frame(frame, 1000)) {
+                RenderingDevice *rd = RenderingServer::get_singleton()
+                    ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+                if (rd && rd->has_method("texture_create_from_android_hardware_buffer") && frame.buffer) {
+                    int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
+                                     RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT |
+                                     RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT);
+                    Variant tex_rid_var = rd->call("texture_create_from_android_hardware_buffer",
+                        (uint64_t)frame.buffer,
+                        (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
+                        frame.width, frame.height, usage);
+                    RID tex_rid = tex_rid_var;
+                    if (tex_rid.is_valid()) {
+                        uploader_->ensure_shader_material();
+                        uploader_->set_texture_from_native_rid(tex_rid, frame.width, frame.height);
+                        frames_decoded_.fetch_add(1);
+
+                        auto decode_done = std::chrono::steady_clock::now();
+                        auto decode_done_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                            decode_done.time_since_epoch()).count();
+                        int64_t submit_us = last_submit_time_us_.load();
+                        if (submit_us > 0 && decode_done_us > submit_us)
+                            last_frame_latency_us_.store((int)(decode_done_us - submit_us));
+
+                        static int log_count = 0;
+                        if (++log_count <= 5)
+                            NF_LOG("StreamConnection", "Native GPU frame: %dx%d", frame.width, frame.height);
+                    }
+                }
+                native_codec_->release_frame(frame);
+            }
+            continue; // Skip FFmpeg path
+        }
+#endif
 
         if (decoder_->is_raw_decode()) {
             if (pkt->size >= (int)sizeof(RawFrameHeader)) {
