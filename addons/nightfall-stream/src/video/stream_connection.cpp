@@ -591,6 +591,12 @@ void StreamConnection::_decode_thread_func() {
             while (native_codec_->dequeue_frame(frame, 1000)) {
                 RenderingDevice *rd = RenderingServer::get_singleton()
                     ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+                static int diag = 0;
+                if (++diag <= 5) {
+                    NF_LOG("StreamConnection", "AHB import check: rd=%p has_method=%d buf=%p",
+                           (void*)rd, rd ? (int)rd->has_method("texture_create_from_android_hardware_buffer") : -1,
+                           (void*)frame.buffer);
+                }
                 if (rd && rd->has_method("texture_create_from_android_hardware_buffer") && frame.buffer) {
                     int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
                                      RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT |
@@ -615,6 +621,13 @@ void StreamConnection::_decode_thread_func() {
                         static int log_count = 0;
                         if (++log_count <= 5)
                             NF_LOG("StreamConnection", "Native GPU frame: %dx%d", frame.width, frame.height);
+                    }
+                } else {
+                    static int skip_log = 0;
+                    if (++skip_log <= 5) {
+                        NF_LOGE("StreamConnection", "AHB import SKIPPED: rd=%p has_method=%d buf=%p",
+                               (void*)rd, rd ? (int)rd->has_method("texture_create_from_android_hardware_buffer") : -1,
+                               (void*)frame.buffer);
                     }
                 }
                 native_codec_->release_frame(frame);
