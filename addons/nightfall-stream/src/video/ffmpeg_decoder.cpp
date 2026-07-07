@@ -11,6 +11,7 @@
 #include <android/hardware_buffer_jni.h>
 extern "C" {
 #include <libavcodec/jni.h>
+#include <libavcodec/mediacodec.h>
 }
 
 static JavaVM *g_jvm = nullptr;
@@ -236,6 +237,37 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
     AVDictionary *opts = nullptr;
     if (is_mediacodec) {
         av_dict_set(&opts, "ndk_codec", "0", 0);
+
+        // Provide a Surface so MediaCodec outputs to GPU memory (AHardwareBuffer).
+        // Without a Surface, MediaCodec falls back to CPU ByteBuffer output.
+        JNIEnv *env = nullptr;
+        bool need_detach = false;
+        if (g_jvm && g_jvm->GetEnv((void **)&env, JNI_VERSION_1_6) == JNI_EDETACHED) {
+            g_jvm->AttachCurrentThread(&env, nullptr);
+            need_detach = true;
+        }
+        if (env) {
+            // Create a SurfaceTexture with a dummy texture to get a Surface
+            jclass cls_st = env->FindClass("android/graphics/SurfaceTexture");
+            if (cls_st) {
+                jmethodID ctor = env->GetMethodID(cls_st, "<init>", "(I)V");
+                jobject surfacetex = env->NewObject(cls_st, ctor, 0); // texName=0, will be created
+                if (surfacetex) {
+                    jclass cls_surface = env->FindClass("android/view/Surface");
+                    jmethodID surf_ctor = env->GetMethodID(cls_surface, "<init>", "(Landroid/graphics/SurfaceTexture;)V");
+                    jobject surface = env->NewObject(cls_surface, surf_ctor, surfacetex);
+                    if (surface) {
+                        AVMediaCodecContext *mc_ctx = av_mediacodec_alloc_context();
+                        mc_ctx->surface = env->NewGlobalRef(surface);
+                        av_mediacodec_default_init((AVCodecContext *)ctx, mc_ctx, mc_ctx->surface);
+                        env->DeleteLocalRef(surface);
+                    }
+                    env->DeleteLocalRef(surfacetex);
+                }
+                env->DeleteLocalRef(cls_st);
+            }
+            if (need_detach) g_jvm->DetachCurrentThread();
+        }
     }
 
     if (is_mediacodec && ctx->codec_id == AV_CODEC_ID_H264 && !ctx->extradata) {
