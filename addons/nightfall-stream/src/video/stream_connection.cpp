@@ -674,6 +674,7 @@ void StreamConnection::_decode_thread_func() {
                 }
 
                 AVFrame *final_frame = tmp;
+                AVFrame *sw_frame = nullptr;
                 bool used_ahb = false;
                 if (tmp->hw_frames_ctx) {
                     // AHardwareBuffer GPU-only path (Android, custom Godot build).
@@ -720,8 +721,19 @@ void StreamConnection::_decode_thread_func() {
                     }
 #endif
                     if (!used_ahb) {
-                        // Fallbacks disabled for testing. Discard frame.
-                        break; // exit avcodec_receive_frame loop
+                        // Fallback: av_hwframe_map/transfer (legacy path)
+                        sw_frame = av_frame_alloc();
+                        int transfer_ret = av_hwframe_map(sw_frame, tmp, AV_HWFRAME_MAP_READ);
+                        if (transfer_ret < 0) {
+                            transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+                        }
+                        if (transfer_ret >= 0) {
+                            av_frame_copy_props(sw_frame, tmp);
+                            final_frame = sw_frame;
+                        } else {
+                            av_frame_free(&sw_frame);
+                            sw_frame = nullptr;
+                        }
                     }
                 }
 
@@ -746,6 +758,9 @@ void StreamConnection::_decode_thread_func() {
                     uploader_->update_from_frame(final_frame);
                 }
 
+                if (sw_frame) {
+                    av_frame_free(&sw_frame);
+                }
                 av_frame_free(&tmp);
             }
         }

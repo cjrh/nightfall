@@ -9,8 +9,6 @@
 #include <jni.h>
 #include <android/hardware_buffer.h>
 #include <android/hardware_buffer_jni.h>
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
 extern "C" {
 #include <libavcodec/jni.h>
 #include <libavcodec/mediacodec.h>
@@ -238,52 +236,7 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
 
     AVDictionary *opts = nullptr;
     if (is_mediacodec) {
-        av_dict_set(&opts, "ndk_codec", "0", 0);
-
-        // Provide a Surface so MediaCodec outputs to GPU memory (AHardwareBuffer).
-        // Must set BOTH AVMediaCodecContext->surface AND AVCodecContext->hwaccel_context.
-        JNIEnv *env = nullptr;
-        bool need_detach = false;
-        if (g_jvm && g_jvm->GetEnv((void **)&env, JNI_VERSION_1_6) == JNI_EDETACHED) {
-            g_jvm->AttachCurrentThread(&env, nullptr);
-            need_detach = true;
-        }
-        if (env) {
-            jclass cls_st = env->FindClass("android/graphics/SurfaceTexture");
-            NF_LOG("FfmpegDecoder", "SurfaceTexture class: %p", (void*)cls_st);
-            if (cls_st) {
-                jmethodID ctor = env->GetMethodID(cls_st, "<init>", "(I)V");
-                jobject surfacetex = env->NewObject(cls_st, ctor, 0);
-                NF_LOG("FfmpegDecoder", "SurfaceTexture created: %p", (void*)surfacetex);
-                if (surfacetex) {
-                    jclass cls_surface = env->FindClass("android/view/Surface");
-                    jmethodID surf_ctor = env->GetMethodID(cls_surface, "<init>", "(Landroid/graphics/SurfaceTexture;)V");
-                    jobject surface = env->NewObject(cls_surface, surf_ctor, surfacetex);
-                    NF_LOG("FfmpegDecoder", "Surface created: %p", (void*)surface);
-                    if (surface) {
-                        // FFmpeg's JNI wrapper expects an ANativeWindow*, not a raw jobject.
-                        // ANativeWindow_fromSurface converts the Java Surface to the native type.
-                        ANativeWindow *native_window = ANativeWindow_fromSurface(env, surface);
-                        AVMediaCodecContext *mc_ctx = av_mediacodec_alloc_context();
-                        mc_ctx->surface = native_window;
-                        av_mediacodec_default_init(ctx, mc_ctx, mc_ctx->surface);
-                        ctx->hwaccel_context = mc_ctx;
-                        NF_LOG("FfmpegDecoder", "MediaCodec Surface configured: native_window=%p mc_ctx=%p",
-                               (void*)native_window, (void*)mc_ctx);
-                        env->DeleteLocalRef(surface);
-                    }
-                    env->DeleteLocalRef(surfacetex);
-                } else {
-                    NF_LOG("FfmpegDecoder", "SurfaceTexture creation FAILED");
-                }
-                env->DeleteLocalRef(cls_st);
-            } else {
-                NF_LOG("FfmpegDecoder", "FindClass SurfaceTexture FAILED");
-            }
-            if (need_detach) g_jvm->DetachCurrentThread();
-        } else {
-            NF_LOG("FfmpegDecoder", "JNI env is NULL!");
-        }
+        av_dict_set(&opts, "ndk_codec", "1", 0);
     }
 
     if (is_mediacodec && ctx->codec_id == AV_CODEC_ID_H264 && !ctx->extradata) {
@@ -489,7 +442,7 @@ int FfmpegDecoder::upgrade_to_mediacodec(const uint8_t *extradata, int extradata
     ctx->thread_type = 0;
 
     AVDictionary *opts = nullptr;
-    av_dict_set(&opts, "ndk_codec", "0", 0);
+    av_dict_set(&opts, "ndk_codec", "1", 0);
 
     int ret = avcodec_open2(ctx, codec, &opts);
     if (opts) av_dict_free(&opts);
