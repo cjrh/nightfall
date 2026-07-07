@@ -606,6 +606,11 @@ void StreamConnection::_decode_thread_func() {
                         (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
                         frame.width, frame.height, usage);
                     RID tex_rid = tex_rid_var;
+                    static int call_log = 0;
+                    if (++call_log <= 10) {
+                        NF_LOG("StreamConnection", "AHB call result: tex_rid_valid=%d var_type=%d",
+                               (int)tex_rid.is_valid(), (int)tex_rid_var.get_type());
+                    }
                     if (tex_rid.is_valid()) {
                         uploader_->ensure_shader_material();
                         uploader_->set_texture_from_native_rid(tex_rid, frame.width, frame.height);
