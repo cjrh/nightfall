@@ -9,7 +9,6 @@
 #include "video/mediacodec_internal.h"
 #include <jni.h>
 #include <android/hardware_buffer.h>
-#include <media/NdkImageReader.h>
 AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
 #endif
 
@@ -676,32 +675,27 @@ void StreamConnection::_decode_thread_func() {
 
                 AVFrame *final_frame = tmp;
                 AVFrame *sw_frame = nullptr;
-                bool used_gpu = false;
+                bool used_ahb = false;
                 if (tmp->hw_frames_ctx) {
+                    // AHardwareBuffer GPU-only path (Android, custom Godot build).
+                    // No fallback — must succeed or frame is discarded.
 #ifdef __ANDROID__
-                    // ImageReader GPU path: av_frame_unref() triggers MediaCodec
-                    // to render to our ImageReader Surface, then we extract the
-                    // AHardwareBuffer and import it directly to Vulkan.
-                    AImageReader *reader = decoder_->get_image_reader();
-                    if (reader) {
-                        int64_t frame_pts = tmp->pts;
-                        int w = tmp->width;
-                        int h = tmp->height;
-
-                        // Trigger render to ImageReader Surface
-                        av_frame_unref(tmp);
-                        tmp = nullptr;
-
-                        // Poll for the rendered image
-                        AImage *image = nullptr;
-                        media_status_t status = AImageReader_acquireLatestImage(reader, &image);
-                        if (status == AMEDIA_OK && image) {
-                            AHardwareBuffer *ahb = nullptr;
-                            AImage_getHardwareBuffer(image, &ahb);
+                    if (decoder_->get_codec_context()) {
+                        jobject codec_obj = (jobject)mediacodec_get_codec_object(
+                            decoder_->get_codec_context());
+                        ssize_t buf_idx = mediacodec_get_buffer_index(tmp);
+                        if (codec_obj && buf_idx >= 0) {
+                            AHardwareBuffer *ahb = mediacodec_get_ahb(codec_obj, buf_idx);
                             if (ahb) {
+                                AHardwareBuffer_Desc desc;
+                                AHardwareBuffer_describe(ahb, &desc);
+                                int w = desc.width;
+                                int h = desc.height;
+
                                 RenderingDevice *rd = RenderingServer::get_singleton()
                                     ? RenderingServer::get_singleton()->get_rendering_device()
                                     : nullptr;
+
                                 if (rd && rd->has_method("texture_create_from_android_hardware_buffer")) {
                                     int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT);
                                     Variant tex_rid_var = rd->call("texture_create_from_android_hardware_buffer",
@@ -710,24 +704,23 @@ void StreamConnection::_decode_thread_func() {
                                     if (tex_rid.is_valid()) {
                                         uploader_->ensure_shader_material();
                                         uploader_->set_texture_from_native_rid(tex_rid, w, h);
-                                        used_gpu = true;
-
-                                        static int img_log = 0;
-                                        if (++img_log <= 3) {
-                                            NF_LOG("StreamConnection", "ImageReader GPU frame: %dx%d via AHB", w, h);
-                                        }
+                                        used_ahb = true;
+                                    } else {
+                                        NF_LOGE("StreamConnection", "Tier1: texture_create_from_android_hardware_buffer returned invalid RID!");
                                     }
+                                } else {
+                                    NF_LOGE("StreamConnection", "Tier1: Godot API texture_create_from_android_hardware_buffer not available. Custom engine build required.");
                                 }
+                                AHardwareBuffer_release(ahb);
+                            } else {
+                                NF_LOGE("StreamConnection", "Tier1: mediacodec_get_ahb returned null");
                             }
-                            AImage_delete(image);
-                        } else if (status != AMEDIA_OK) {
-                            static int poll_fail = 0;
-                            if (++poll_fail <= 3)
-                                NF_LOGE("StreamConnection", "ImageReader acquire failed: %d", status);
+                        } else {
+                            NF_LOGE("StreamConnection", "Tier1: cannot get MediaCodec object or buffer index");
                         }
                     }
 #endif
-                    if (!used_gpu) {
+                    if (!used_ahb) {
                         // Fallback: av_hwframe_map/transfer (legacy path)
                         sw_frame = av_frame_alloc();
                         int transfer_ret = av_hwframe_map(sw_frame, tmp, AV_HWFRAME_MAP_READ);
@@ -761,16 +754,14 @@ void StreamConnection::_decode_thread_func() {
                     uploader_->update_colorspace((int)frame_cs, (int)frame_cr);
                 }
 
-                if (!used_gpu) {
+                if (!used_ahb) {
                     uploader_->update_from_frame(final_frame);
                 }
 
                 if (sw_frame) {
                     av_frame_free(&sw_frame);
                 }
-                if (tmp) {
-                    av_frame_free(&tmp);
-                }
+                av_frame_free(&tmp);
             }
         }
     }
