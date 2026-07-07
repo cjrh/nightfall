@@ -698,17 +698,20 @@ void StreamConnection::_decode_thread_func() {
                                 int lock_ret = AHardwareBuffer_lock(ahb,
                                     AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &mapped);
                                 if (lock_ret == 0 && mapped) {
+                                    // Ensure uploader is ready for NV12
+                                    uploader_->ensure_shader_material();
+                                    uploader_->set_active(true); // NV12 mode
                                     int w = desc.width;
                                     int h = desc.height;
                                     int y_stride = desc.stride; // Y plane stride
                                     int y_size = y_stride * h;
                                     int uv_size = y_stride * (h / 2);
 
-                                    // Ensure uploader is configured for NV12.
-                                    // The decoder setup may not have completed on the render
-                                    // thread yet, so set main-thread flags explicitly.
-                                    uploader_->ensure_shader_material();
-                                    uploader_->set_active(true); // NV12 mode
+                                    // Upload AHB data using CPU-mapped GPU memory (AHardwareBuffer_lock).
+                                    // True GPU-only path via texture_create_from_android_hardware_buffer()
+                                    // is available in custom Godot builds but needs uploader/shader changes
+                                    // for single-texture YCbCr sampling. For now, AHB_lock gives GPU-mapped CPU
+                                    // access without the av_hwframe_transfer_data driver copy.
 
                                     // NV12: Y plane followed by interleaved UV plane
                                     if (y_stride == w) {

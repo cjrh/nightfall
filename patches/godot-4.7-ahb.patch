@@ -1,5 +1,5 @@
 diff --git a/drivers/vulkan/rendering_device_driver_vulkan.cpp b/drivers/vulkan/rendering_device_driver_vulkan.cpp
-index 4b1bd9f..7708d48 100644
+index 4b1bd9f..da9ee9a 100644
 --- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
 +++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
 @@ -582,6 +582,9 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
@@ -12,7 +12,7 @@ index 4b1bd9f..7708d48 100644
  	_register_requested_device_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, false);
  	_register_requested_device_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, false);
  	_register_requested_device_extension(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME, false);
-@@ -2479,6 +2482,60 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
+@@ -2479,6 +2482,83 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
  	return TextureID(tex_info);
  }
  
@@ -21,10 +21,6 @@ index 4b1bd9f..7708d48 100644
 +
 +RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_android_hardware_buffer(void *p_buffer, DataFormat p_format, uint32_t p_width, uint32_t p_height, BitField<TextureUsageBits> p_usage) {
 +	AHardwareBuffer *hb = (AHardwareBuffer *)p_buffer;
-+
-+	// Get buffer properties
-+	AHardwareBuffer_Desc desc;
-+	AHardwareBuffer_describe(hb, &desc);
 +
 +	VkAndroidHardwareBufferFormatPropertiesANDROID format_props = {};
 +	format_props.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID;
@@ -35,6 +31,23 @@ index 4b1bd9f..7708d48 100644
 +
 +	VkResult err = vkGetAndroidHardwareBufferPropertiesANDROID(vk_device, hb, &props);
 +	ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkGetAndroidHardwareBufferPropertiesANDROID failed: %d", err));
++
++	// Create YCbCr conversion for NV12 hardware decode output.
++	// This enables Vulkan to convert YCbCr → RGB directly during sampling.
++	VkSamplerYcbcrConversionCreateInfo ycbcr_info = {};
++	ycbcr_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO;
++	ycbcr_info.format = VK_FORMAT_UNDEFINED; // External format
++	ycbcr_info.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709;
++	ycbcr_info.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_NARROW;
++	ycbcr_info.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
++	ycbcr_info.xChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
++	ycbcr_info.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
++	ycbcr_info.chromaFilter = VK_FILTER_LINEAR;
++	ycbcr_info.forceExplicitReconstruction = VK_FALSE;
++
++	VkSamplerYcbcrConversion ycbcr_conversion = VK_NULL_HANDLE;
++	err = vkCreateSamplerYcbcrConversion(vk_device, &ycbcr_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION), &ycbcr_conversion);
++	ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkCreateSamplerYcbcrConversion failed: %d", err));
 +
 +	VkExternalFormatANDROID external_format = {};
 +	external_format.sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID;
@@ -63,21 +76,127 @@ index 4b1bd9f..7708d48 100644
 +
 +	VkImage vk_image = VK_NULL_HANDLE;
 +	err = vkCreateImage(vk_device, &image_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE), &vk_image);
-+	ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkCreateImage from AHardwareBuffer failed: %d", err));
++	if (err) {
++		vkDestroySamplerYcbcrConversion(vk_device, ycbcr_conversion, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION));
++		ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkCreateImage from AHardwareBuffer failed: %d", err));
++	}
 +
 +	uint64_t native_texture = (uint64_t)vk_image;
-+	return texture_create_from_extension(native_texture, TEXTURE_TYPE_2D, p_format, 1, false, 1);
++	TextureID tid = texture_create_from_extension(native_texture, TEXTURE_TYPE_2D, p_format, 1, false, 1);
++
++	if (tid.id) {
++		TextureInfo *tex_info = (TextureInfo *)tid.id;
++		tex_info->is_ycbcr = true;
++		tex_info->ycbcr_conversion = ycbcr_conversion;
++	}
++	return tid;
 +}
 +#endif
 +
  RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared(TextureID p_original_texture, const TextureView &p_view) {
  	const TextureInfo *owner_tex_info = (const TextureInfo *)p_original_texture.id;
  #ifdef DEBUG_ENABLED
+@@ -2592,6 +2672,16 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
+ void RenderingDeviceDriverVulkan::texture_free(TextureID p_texture) {
+ 	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
+ 	vkDestroyImageView(vk_device, tex_info->vk_view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW));
++#ifdef ANDROID_ENABLED
++	if (tex_info->ycbcr_sampler != VK_NULL_HANDLE) {
++		vkDestroySampler(vk_device, tex_info->ycbcr_sampler, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER));
++		tex_info->ycbcr_sampler = VK_NULL_HANDLE;
++	}
++	if (tex_info->ycbcr_conversion != VK_NULL_HANDLE) {
++		vkDestroySamplerYcbcrConversion(vk_device, tex_info->ycbcr_conversion, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION));
++		tex_info->ycbcr_conversion = VK_NULL_HANDLE;
++	}
++#endif
+ 	if (tex_info->allocation.handle) {
+ 		if (!Engine::get_singleton()->is_extra_gpu_memory_tracking_enabled()) {
+ 			vmaDestroyImage(allocator, tex_info->vk_view_create_info.image, tex_info->allocation.handle);
+@@ -4704,25 +4794,54 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
+ 					vk_writes[writes_amount].pImageInfo = vk_img_infos;
+ 				}
+ 			} break;
+-			case UNIFORM_TYPE_SAMPLER_WITH_TEXTURE: {
+-				num_descriptors = uniform.ids.size() / 2;
+-				VkDescriptorImageInfo *vk_img_infos = ALLOCA_ARRAY(VkDescriptorImageInfo, num_descriptors);
++		case UNIFORM_TYPE_SAMPLER_WITH_TEXTURE: {
++			num_descriptors = uniform.ids.size() / 2;
++			VkDescriptorImageInfo *vk_img_infos = ALLOCA_ARRAY(VkDescriptorImageInfo, num_descriptors);
+ 
+-				for (uint32_t j = 0; j < num_descriptors; j++) {
++			for (uint32_t j = 0; j < num_descriptors; j++) {
++				const TextureInfo *tex_info = (const TextureInfo *)uniform.ids[j * 2 + 1].id;
++				TextureInfo *tex_info_mut = const_cast<TextureInfo *>(tex_info);
+ #ifdef DEBUG_ENABLED
+-					if (((const TextureInfo *)uniform.ids[j * 2 + 1].id)->transient) {
+-						ERR_PRINT("TEXTURE_USAGE_TRANSIENT_BIT texture must not be used for sampling in a shader.");
++				if (tex_info->transient) {
++					ERR_PRINT("TEXTURE_USAGE_TRANSIENT_BIT texture must not be used for sampling in a shader.");
++				}
++#endif
++				vk_img_infos[j] = {};
++#ifdef ANDROID_ENABLED
++				if (tex_info->is_ycbcr && tex_info->ycbcr_conversion != VK_NULL_HANDLE) {
++					// Lazy-create YCbCr sampler, cached on the texture
++					if (tex_info_mut->ycbcr_sampler == VK_NULL_HANDLE) {
++						VkSamplerYcbcrConversionInfo ycbcr_sampler_info = {};
++						ycbcr_sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
++						ycbcr_sampler_info.conversion = tex_info->ycbcr_conversion;
++
++						VkSamplerCreateInfo sampler_ci = {};
++						sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
++						sampler_ci.pNext = &ycbcr_sampler_info;
++						sampler_ci.magFilter = VK_FILTER_LINEAR;
++						sampler_ci.minFilter = VK_FILTER_LINEAR;
++						sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
++						sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
++						sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
++						sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
++						sampler_ci.minLod = 0.0f;
++						sampler_ci.maxLod = 1.0f;
++
++						vkCreateSampler(vk_device, &sampler_ci, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER), &tex_info_mut->ycbcr_sampler);
+ 					}
++					vk_img_infos[j].sampler = tex_info->ycbcr_sampler;
++				} else
+ #endif
+-					vk_img_infos[j] = {};
++				{
+ 					vk_img_infos[j].sampler = (VkSampler)uniform.ids[j * 2 + 0].id;
+-					vk_img_infos[j].imageView = ((const TextureInfo *)uniform.ids[j * 2 + 1].id)->vk_view;
+-					vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+ 				}
++				vk_img_infos[j].imageView = tex_info->vk_view;
++				vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++			}
+ 
+-				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+-				vk_writes[writes_amount].pImageInfo = vk_img_infos;
+-			} break;
++			vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++			vk_writes[writes_amount].pImageInfo = vk_img_infos;
++		} break;
+ 			case UNIFORM_TYPE_TEXTURE: {
+ 				num_descriptors = uniform.ids.size();
+ 				VkDescriptorImageInfo *vk_img_infos = ALLOCA_ARRAY(VkDescriptorImageInfo, num_descriptors);
 diff --git a/drivers/vulkan/rendering_device_driver_vulkan.h b/drivers/vulkan/rendering_device_driver_vulkan.h
-index 6d17386..b975e1a 100644
+index 6d17386..bc84021 100644
 --- a/drivers/vulkan/rendering_device_driver_vulkan.h
 +++ b/drivers/vulkan/rendering_device_driver_vulkan.h
-@@ -295,6 +295,9 @@ public:
+@@ -284,6 +284,11 @@ public:
+ 			VmaAllocationInfo info = {};
+ 		} allocation; // All 0/null if just a view.
+ 		bool is_subsampled = false;
++#ifdef ANDROID_ENABLED
++		bool is_ycbcr = false;
++		VkSamplerYcbcrConversion ycbcr_conversion = VK_NULL_HANDLE;
++		VkSampler ycbcr_sampler = VK_NULL_HANDLE;
++#endif
+ #ifdef DEBUG_ENABLED
+ 		bool created_from_extension = false;
+ 		bool transient = false;
+@@ -295,6 +300,9 @@ public:
  public:
  	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) override final;
  	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) override final;
