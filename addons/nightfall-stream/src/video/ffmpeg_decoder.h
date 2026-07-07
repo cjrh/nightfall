@@ -17,6 +17,13 @@ struct AVBufferRef;
 #include <libavutil/pixfmt.h>
 }
 
+#ifdef __ANDROID__
+#include <android/hardware_buffer.h>
+struct AImageReader;
+struct AImage;
+struct ANativeWindow;
+#endif
+
 namespace godot {
 
 class FfmpegDecoder : public RefCounted {
@@ -62,6 +69,12 @@ public:
 
     static Vector<String> get_candidate_decoders(int codec_family);
 
+#ifdef __ANDROID__
+    bool has_image_reader() const { return image_reader_ != nullptr; }
+    AImageReader *get_image_reader() const { return image_reader_; }
+    void release_image_reader();
+#endif
+
 private:
     const AVCodec *v_codec = nullptr;
     AVCodecContext *v_codec_ctx = nullptr;
@@ -73,6 +86,10 @@ private:
     bool is_raw_decode_active = false;
     int video_width = 0;
     int video_height = 0;
+#ifdef __ANDROID__
+    AImageReader *image_reader_ = nullptr;
+    ANativeWindow *native_window_ = nullptr;
+#endif
 
     Vector<AVHWDeviceType> _get_supported_hw_devices();
     int _try_open_decoder(const String &codec_name, int width, int height, AVHWDeviceType hw_type, bool disable_hw);
