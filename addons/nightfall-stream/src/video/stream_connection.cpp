@@ -194,7 +194,7 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
         self->native_codec_ = new AndroidMediaCodec();
         if (self->native_codec_->init("video/hevc", width, height)) {
             NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
-            uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
+            self->uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
             self->decoder_ready_.store(true);
             return 0;
         }
