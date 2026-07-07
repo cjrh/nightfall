@@ -240,40 +240,6 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
     AVDictionary *opts = nullptr;
     if (is_mediacodec) {
         av_dict_set(&opts, "ndk_codec", "1", 0);
-
-        // Only for actual stream decode (width > 1280), not probe_video_format test.
-        // Probe creates/destroys rapidly and ImageReader GPU resources can conflict.
-        if (width > 1280) {
-            media_status_t status = AImageReader_new(width, height,
-                AIMAGE_FORMAT_YUV_420_888, 4, &image_reader_);
-            if (status == AMEDIA_OK && image_reader_) {
-                status = AImageReader_getWindow(image_reader_, &native_window_);
-                if (status == AMEDIA_OK && native_window_) {
-                    ANativeWindow_acquire(native_window_);
-                    AVBufferRef *hw_dev_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_MEDIACODEC);
-                    if (hw_dev_ref) {
-                        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)hw_dev_ref->data;
-                        AVMediaCodecDeviceContext *mc_dev = (AVMediaCodecDeviceContext *)dev_ctx->hwctx;
-                        mc_dev->native_window = native_window_;
-                        int init_ret = av_hwdevice_ctx_init(hw_dev_ref);
-                        if (init_ret >= 0) {
-                            ctx->hw_device_ctx = hw_dev_ref;
-                            NF_LOG("FfmpegDecoder", "ImageReader created: %dx%d, native_window=%p",
-                                   width, height, (void*)native_window_);
-                        } else {
-                            NF_LOGE("FfmpegDecoder", "av_hwdevice_ctx_init failed: %d", init_ret);
-                            av_buffer_unref(&hw_dev_ref);
-                        }
-                    }
-                } else {
-                    NF_LOGE("FfmpegDecoder", "AImageReader_getWindow failed: %d", status);
-                    AImageReader_delete(image_reader_);
-                    image_reader_ = nullptr;
-                }
-            } else {
-                NF_LOGE("FfmpegDecoder", "AImageReader_new failed: %d", status);
-            }
-        }
     }
 
     if (is_mediacodec && ctx->codec_id == AV_CODEC_ID_H264 && !ctx->extradata) {
@@ -449,6 +415,51 @@ int FfmpegDecoder::get_video_width() const { return video_width; }
 int FfmpegDecoder::get_video_height() const { return video_height; }
 
 #ifdef __ANDROID__
+bool FfmpegDecoder::create_image_reader(int width, int height) {
+    if (image_reader_) return true; // Already created
+
+    media_status_t status = AImageReader_new(width, height,
+        AIMAGE_FORMAT_YUV_420_888, 4, &image_reader_);
+    if (status != AMEDIA_OK || !image_reader_) {
+        NF_LOGE("FfmpegDecoder", "AImageReader_new failed: %d", status);
+        return false;
+    }
+
+    status = AImageReader_getWindow(image_reader_, &native_window_);
+    if (status != AMEDIA_OK || !native_window_) {
+        NF_LOGE("FfmpegDecoder", "AImageReader_getWindow failed: %d", status);
+        AImageReader_delete(image_reader_);
+        image_reader_ = nullptr;
+        return false;
+    }
+
+    ANativeWindow_acquire(native_window_);
+
+    // Attach to decoder via AVHWDeviceContext
+    if (v_codec_ctx) {
+        AVBufferRef *hw_dev_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_MEDIACODEC);
+        if (hw_dev_ref) {
+            AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)hw_dev_ref->data;
+            AVMediaCodecDeviceContext *mc_dev = (AVMediaCodecDeviceContext *)dev_ctx->hwctx;
+            mc_dev->native_window = native_window_;
+            int init_ret = av_hwdevice_ctx_init(hw_dev_ref);
+            if (init_ret >= 0) {
+                v_codec_ctx->hw_device_ctx = hw_dev_ref;
+                NF_LOG("FfmpegDecoder", "ImageReader attached: %dx%d", width, height);
+                return true;
+            }
+            NF_LOGE("FfmpegDecoder", "av_hwdevice_ctx_init failed: %d", init_ret);
+            av_buffer_unref(&hw_dev_ref);
+        }
+    }
+
+    ANativeWindow_release(native_window_);
+    native_window_ = nullptr;
+    AImageReader_delete(image_reader_);
+    image_reader_ = nullptr;
+    return false;
+}
+
 void FfmpegDecoder::release_image_reader() {
     if (native_window_) {
         ANativeWindow_release(native_window_);

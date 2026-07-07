@@ -72,6 +72,7 @@ public:
 #ifdef __ANDROID__
     bool has_image_reader() const { return image_reader_ != nullptr; }
     AImageReader *get_image_reader() const { return image_reader_; }
+    bool create_image_reader(int width, int height);
     void release_image_reader();
 #endif
 
