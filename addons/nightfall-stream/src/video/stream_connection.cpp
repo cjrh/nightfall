@@ -592,8 +592,8 @@ void StreamConnection::_decode_thread_func() {
                 RenderingDevice *rd = RenderingServer::get_singleton()
                     ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
                 static int diag = 0;
-                if (++diag <= 5) {
-                    NF_LOG("StreamConnection", "AHB import check: rd=%p has_method=%d buf=%p",
+                if (++diag <= 10 || diag % 60 == 0) {
+                    NF_LOG("StreamConnection", "AHB import: rd=%p has=%d buf=%p",
                            (void*)rd, rd ? (int)rd->has_method("texture_create_from_android_hardware_buffer") : -1,
                            (void*)frame.buffer);
                 }
