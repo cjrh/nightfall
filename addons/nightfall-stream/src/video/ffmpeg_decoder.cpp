@@ -61,12 +61,19 @@ AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_inde
                 jobject hb = env->CallObjectMethod(image, mid_getHardwareBuffer);
                 if (hb && !env->ExceptionCheck()) {
                     ahb = AHardwareBuffer_fromHardwareBuffer(env, hb);
+                    // Keep the Java HardwareBuffer ref alive. The AHardwareBuffer is
+                    // only valid while the Java object exists. We return the AHB and
+                    // keep the JNI reference; the caller must release it after the
+                    // Vulkan external memory import completes.
+                    // Don't close the Image either - that would release the buffer.
                 }
-                if (hb) env->DeleteLocalRef(hb);
+                if (!ahb && hb) env->DeleteLocalRef(hb);
             }
             env->DeleteLocalRef(cls_image);
-            env->CallVoidMethod(image, env->GetMethodID(cls_image, "close", "()V"));
-            env->DeleteLocalRef(image);
+            if (!ahb && image) {
+                env->CallVoidMethod(image, env->GetMethodID(cls_image, "close", "()V"));
+                env->DeleteLocalRef(image);
+            }
         } else if (env->ExceptionCheck()) {
             env->ExceptionClear();
         }
