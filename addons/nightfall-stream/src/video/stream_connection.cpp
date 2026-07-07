@@ -183,13 +183,29 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
 
     if (self->local_capture_mode_) {
         NF_LOG("StreamConnection", "Local capture mode: skipping Sunshine decoder/uploader setup");
-        // ShaderMaterial was pre-created by ensure_shader_material() on the main thread.
-        // X11 capture will set up BGRA textures via setup_bgra() in _process().
-        // Mark decoder as ready so connection proceeds.
         self->decoder_ready_.store(true);
         return 0;
     }
 
+#ifdef __ANDROID__
+    // Android: ONLY native NDK MediaCodec + ImageReader for zero-copy GPU decode.
+    // No FFmpeg fallback. Must fail loudly if unavailable.
+    if (videoFormat & VIDEO_FORMAT_MASK_H265) {
+        self->native_codec_ = new AndroidMediaCodec();
+        if (self->native_codec_->init("video/hevc", width, height)) {
+            NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
+            uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
+            self->decoder_ready_.store(true);
+            return 0;
+        }
+        NF_LOGE("StreamConnection", "FATAL: Native MediaCodec init failed");
+        delete self->native_codec_;
+        self->native_codec_ = nullptr;
+        return -1;
+    }
+    NF_LOGE("StreamConnection", "FATAL: Unsupported video format 0x%x on Android", videoFormat);
+    return -1;
+#else
     int ret = self->decoder_->setup(videoFormat, width, height, false);
     if (ret != 0) {
         NF_LOGE("StreamConnection", "Decoder setup FAILED: ret=%d", ret);
@@ -200,23 +216,6 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
            self->decoder_->get_decoder_name().utf8().get_data(),
            self->decoder_->is_hw_decode() ? "yes" : "no",
            self->decoder_->is_raw_decode() ? "yes" : "no");
-
-#ifdef __ANDROID__
-    // Create native MediaCodec with ImageReader for zero-copy GPU decode.
-    // Only activate when the custom Godot engine with the AHB import API is present.
-    RenderingDevice *rd = RenderingServer::get_singleton()
-        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
-    if ((videoFormat & VIDEO_FORMAT_MASK_H265) && rd && rd->has_method("texture_create_from_android_hardware_buffer")) {
-        self->native_codec_ = new AndroidMediaCodec();
-        if (self->native_codec_->init("video/hevc", width, height)) {
-            NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
-        } else {
-            NF_LOGE("StreamConnection", "Native MediaCodec init failed, falling back to FFmpeg");
-            delete self->native_codec_;
-            self->native_codec_ = nullptr;
-        }
-    }
-#endif
 
     int pix_fmt = AV_PIX_FMT_YUV420P;
     if (self->decoder_->is_raw_decode()) {
@@ -233,6 +232,7 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
 
     self->decoder_ready_.store(true);
     return 0;
+#endif
 }
 
 void StreamConnection::_cb_decoder_start() {
