@@ -248,25 +248,36 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
         }
         if (env) {
             jclass cls_st = env->FindClass("android/graphics/SurfaceTexture");
+            NF_LOG("FfmpegDecoder", "SurfaceTexture class: %p", (void*)cls_st);
             if (cls_st) {
                 jmethodID ctor = env->GetMethodID(cls_st, "<init>", "(I)V");
                 jobject surfacetex = env->NewObject(cls_st, ctor, 0);
+                NF_LOG("FfmpegDecoder", "SurfaceTexture created: %p", (void*)surfacetex);
                 if (surfacetex) {
                     jclass cls_surface = env->FindClass("android/view/Surface");
                     jmethodID surf_ctor = env->GetMethodID(cls_surface, "<init>", "(Landroid/graphics/SurfaceTexture;)V");
                     jobject surface = env->NewObject(cls_surface, surf_ctor, surfacetex);
+                    NF_LOG("FfmpegDecoder", "Surface created: %p", (void*)surface);
                     if (surface) {
                         AVMediaCodecContext *mc_ctx = av_mediacodec_alloc_context();
                         mc_ctx->surface = env->NewGlobalRef(surface);
                         av_mediacodec_default_init(ctx, mc_ctx, mc_ctx->surface);
                         ctx->hwaccel_context = mc_ctx;
+                        NF_LOG("FfmpegDecoder", "MediaCodec Surface configured: surface=%p mc_ctx=%p hwaccel_context=%p",
+                               mc_ctx->surface, (void*)mc_ctx, (void*)ctx->hwaccel_context);
                         env->DeleteLocalRef(surface);
                     }
                     env->DeleteLocalRef(surfacetex);
+                } else {
+                    NF_LOG("FfmpegDecoder", "SurfaceTexture creation FAILED");
                 }
                 env->DeleteLocalRef(cls_st);
+            } else {
+                NF_LOG("FfmpegDecoder", "FindClass SurfaceTexture FAILED");
             }
             if (need_detach) g_jvm->DetachCurrentThread();
+        } else {
+            NF_LOG("FfmpegDecoder", "JNI env is NULL!");
         }
     }
 
