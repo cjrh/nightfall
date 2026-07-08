@@ -386,6 +386,8 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
         self->native_codec_ = new AndroidMediaCodec();
         if (self->native_codec_->init("video/hevc", width, height)) {
             NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
+            self->native_video_width_ = width;
+            self->native_video_height_ = height;
             self->uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
             self->uploader_->set_active(true); // NV12 mode
             self->decoder_ready_.store(true);
@@ -1323,17 +1325,22 @@ String StreamConnection::get_decoder_name() const {
 }
 
 int StreamConnection::get_video_width() const {
-    if (decoder_.is_valid()) return decoder_->get_video_width();
+    if (decoder_.is_valid() && decoder_->get_video_width() > 0) return decoder_->get_video_width();
+    if (native_video_width_ > 0) return native_video_width_;
     return 0;
 }
 
 int StreamConnection::get_video_height() const {
-    if (decoder_.is_valid()) return decoder_->get_video_height();
+    if (decoder_.is_valid() && decoder_->get_video_height() > 0) return decoder_->get_video_height();
+    if (native_video_height_ > 0) return native_video_height_;
     return 0;
 }
 
 bool StreamConnection::is_hw_decode() const {
     if (decoder_.is_valid()) return decoder_->is_hw_decode();
+#ifdef __ANDROID__
+    if (native_codec_) return true; // Native MediaCodec is always HW
+#endif
     return false;
 }
 

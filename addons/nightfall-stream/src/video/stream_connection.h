@@ -151,6 +151,8 @@ private:
     RID dummy_sampler_;
     RID rgba_output_tex_;
     bool compute_pipeline_ready_ = false;
+    int native_video_width_ = 0;
+    int native_video_height_ = 0;
     void _ensure_compute_pipeline(RenderingDevice *rd, int width, int height);
     void _render_compute_dispatch(RID ycbcr_tex_rid, RID ycbcr_sampler_rid, uint64_t ahb_ptr, int width, int height);
     void _render_compute_dispatch_rt(); // Called on render thread, reads pending_ members
