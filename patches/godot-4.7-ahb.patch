@@ -1,5 +1,5 @@
 diff --git a/drivers/vulkan/rendering_device_driver_vulkan.cpp b/drivers/vulkan/rendering_device_driver_vulkan.cpp
-index 4b1bd9f..85040a9 100644
+index 4b1bd9f..1e2df9a 100644
 --- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
 +++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
 @@ -582,6 +582,9 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
@@ -38,8 +38,8 @@ index 4b1bd9f..85040a9 100644
 +	ycbcr_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO;
 +	ycbcr_info.format = VK_FORMAT_UNDEFINED; // External format
 +	ycbcr_info.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709;
-+	ycbcr_info.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_NARROW;
-+	ycbcr_info.components = { VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_IDENTITY };
++	ycbcr_info.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
++	ycbcr_info.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
 +	ycbcr_info.xChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
 +	ycbcr_info.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
 +	ycbcr_info.chromaFilter = VK_FILTER_LINEAR;
