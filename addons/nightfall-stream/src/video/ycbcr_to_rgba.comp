@@ -14,6 +14,15 @@ void main() {
         return;
     }
     vec2 uv = (vec2(gl_GlobalInvocationID.xy) + 0.5) / vec2(pc.width, pc.height);
-    vec4 color = texture(ycbcr_input, uv);
-    imageStore(rgba_output, ivec2(gl_GlobalInvocationID.xy), color);
+    vec4 c = texture(ycbcr_input, uv);
+    // Qualcomm Adreno YCbCr sampler outputs raw YCbCr planes:
+    //   c.g = Y (luma), c.r = Cr (V), c.b = Cb (U)
+    float y = c.g;
+    float cb = c.b - 0.5;
+    float cr = c.r - 0.5;
+    // BT.709 YCbCr -> RGB
+    float r = y + 1.5748 * cr;
+    float g = y - 0.1873 * cb - 0.4681 * cr;
+    float b = y + 1.8556 * cb;
+    imageStore(rgba_output, ivec2(gl_GlobalInvocationID.xy), vec4(r, g, b, 1.0));
 }
