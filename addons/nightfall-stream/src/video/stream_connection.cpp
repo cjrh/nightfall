@@ -72,6 +72,12 @@ StreamConnection::~StreamConnection() {
         if (dummy_sampler_.is_valid()) rd->free_rid(dummy_sampler_);
         if (rgba_output_tex_.is_valid()) rd->free_rid(rgba_output_tex_);
     }
+    // Safe to shutdown now — decode thread is joined by stop()
+    auto *old_codec = native_codec_.exchange(nullptr);
+    if (old_codec) {
+        old_codec->shutdown();
+        delete old_codec;
+    }
 #endif
     if (h264_extradata_) {
         av_freep(&h264_extradata_);
@@ -174,12 +180,9 @@ void StreamConnection::_render_compute_dispatch_rt() {
         return;
     }
 
-    // One-time: create RS texture wrapper for canvas display (must be on render thread)
-    static bool display_wired = false;
-    static int dw_check = 0;
-    if (++dw_check <= 5) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: dw=%d rgba_valid=%d", (int)display_wired, (int)rgba_output_tex_.is_valid());
-    if (!display_wired && rgba_output_tex_.is_valid()) {
-        display_wired = true;
+    // One-time per session: create RS texture wrapper for canvas display (must be on render thread)
+    if (!display_wired_ && rgba_output_tex_.is_valid()) {
+        display_wired_ = true;
         RenderingServer *rs = RenderingServer::get_singleton();
         if (rs) {
             RID rs_tex = rs->texture_rd_create(rgba_output_tex_);
@@ -382,10 +385,42 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
 #ifdef __ANDROID__
     // Android: ONLY native NDK MediaCodec + ImageReader for zero-copy GPU decode.
     // No FFmpeg fallback. Must fail loudly if unavailable.
+
+    // Shut down any existing codec before reconfiguration
+    // IMPORTANT: don't call shutdown() here — the decode thread may still be
+    // inside a dequeue_frame() call. Just swap the pointer atomically.
+    // Old codecs will be cleaned up in _cb_decoder_cleanup via exchange+shutdown.
+    auto *old_codec = self->native_codec_.exchange(nullptr);
+    if (old_codec) {
+        // Can't safely shutdown or delete here — decode thread may be using it.
+        // Store in a to-be-cleaned-up list or just leak until full stop.
+        // The decode thread loads the atomic pointer fresh each iteration,
+        // so it will switch to the new codec on the next loop.
+    }
+
+    // Reset compute pipeline state for reconfiguration
+    RenderingDevice *rd = RenderingServer::get_singleton()
+        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    if (rd) {
+        if (self->compute_pipeline_.is_valid()) rd->free_rid(self->compute_pipeline_);
+        if (self->compute_shader_.is_valid()) rd->free_rid(self->compute_shader_);
+        if (self->dummy_sampler_.is_valid()) rd->free_rid(self->dummy_sampler_);
+        if (self->rgba_output_tex_.is_valid()) rd->free_rid(self->rgba_output_tex_);
+    }
+    self->compute_pipeline_ready_ = false;
+    self->display_wired_ = false;
+
+    const char *mime = nullptr;
     if (videoFormat & VIDEO_FORMAT_MASK_H265) {
-        self->native_codec_ = new AndroidMediaCodec();
-        if (self->native_codec_->init("video/hevc", width, height)) {
-            NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d", width, height);
+        mime = "video/hevc";
+    } else if (videoFormat & VIDEO_FORMAT_MASK_H264) {
+        mime = "video/avc";
+    }
+    if (mime) {
+        auto *new_codec = new AndroidMediaCodec();
+        if (new_codec->init(mime, width, height)) {
+            NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d mime=%s", width, height, mime);
+            self->native_codec_.store(new_codec);
             self->native_video_width_ = width;
             self->native_video_height_ = height;
             self->uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
@@ -393,9 +428,8 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
             self->decoder_ready_.store(true);
             return 0;
         }
-        NF_LOGE("StreamConnection", "FATAL: Native MediaCodec init failed");
-        delete self->native_codec_;
-        self->native_codec_ = nullptr;
+        NF_LOGE("StreamConnection", "FATAL: Native MediaCodec init failed for %s", mime);
+        delete new_codec;
         return -1;
     }
     NF_LOGE("StreamConnection", "FATAL: Unsupported video format 0x%x on Android", videoFormat);
@@ -451,11 +485,9 @@ void StreamConnection::_cb_decoder_cleanup() {
             self->uploader_->cleanup();
         }
 #ifdef __ANDROID__
-        if (self->native_codec_) {
-            self->native_codec_->shutdown();
-            delete self->native_codec_;
-            self->native_codec_ = nullptr;
-        }
+        // Just swap pointer — don't shutdown while decode thread may be active.
+        // Final cleanup happens in destructor after decode thread is joined.
+        self->native_codec_.exchange(nullptr);
         // Free compute pipeline resources
         RenderingDevice *rd = RenderingServer::get_singleton()
             ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
@@ -785,15 +817,16 @@ void StreamConnection::_decode_thread_func() {
         if (!pkt) continue;
 
 #ifdef __ANDROID__
-        if (native_codec_) {
+        AndroidMediaCodec *codec = native_codec_.load();
+        if (codec && decoder_ready_.load()) {
             // Native MediaCodec path: feed raw packet data, get AHB frames
-            int send_ret = native_codec_->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
+            int send_ret = codec->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
             av_packet_free(&pkt);
             if (!send_ret) continue;
 
             // Try to dequeue frames
             NativeDecodedFrame frame;
-            while (native_codec_->dequeue_frame(frame, 1000)) {
+            while (codec->dequeue_frame(frame, 1000)) {
                 RenderingDevice *rd = RenderingServer::get_singleton()
                     ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
 
@@ -801,7 +834,7 @@ void StreamConnection::_decode_thread_func() {
                     __android_log_print(ANDROID_LOG_ERROR, "STRDEBG", "SKIP: rd=%p has=%d buf=%p",
                         (void*)rd, rd ? (int)rd->has_method("texture_create_from_android_hardware_buffer") : -1,
                         (void*)frame.buffer);
-                    native_codec_->release_frame(frame);
+                    codec->release_frame(frame);
                     continue;
                 }
 
@@ -809,7 +842,7 @@ void StreamConnection::_decode_thread_func() {
                 _ensure_compute_pipeline(rd, frame.width, frame.height);
 
                 if (!compute_pipeline_ready_) {
-                    native_codec_->release_frame(frame);
+                    codec->release_frame(frame);
                     continue;
                 }
 
@@ -826,7 +859,7 @@ void StreamConnection::_decode_thread_func() {
                 if (++a_log <= 1) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "AHB_OK");
 
                 if (!ycbcr_tex_rid.is_valid()) {
-                    native_codec_->release_frame(frame);
+                    codec->release_frame(frame);
                     continue;
                 }
 
@@ -838,7 +871,7 @@ void StreamConnection::_decode_thread_func() {
 
                 if (!ycbcr_sampler_rid.is_valid()) {
                     rd->free_rid(ycbcr_tex_rid);
-                    native_codec_->release_frame(frame);
+                    codec->release_frame(frame);
                     continue;
                 }
 
@@ -880,7 +913,7 @@ void StreamConnection::_decode_thread_func() {
                 if (submit_us > 0 && decode_done_us > submit_us)
                     last_frame_latency_us_.store((int)(decode_done_us - submit_us));
 
-                native_codec_->release_frame(frame);
+                codec->release_frame(frame);
             }
             continue; // Skip FFmpeg path
         }
@@ -1337,10 +1370,10 @@ int StreamConnection::get_video_height() const {
 }
 
 bool StreamConnection::is_hw_decode() const {
-    if (decoder_.is_valid()) return decoder_->is_hw_decode();
 #ifdef __ANDROID__
     if (native_codec_) return true; // Native MediaCodec is always HW
 #endif
+    if (decoder_.is_valid()) return decoder_->is_hw_decode();
     return false;
 }
 

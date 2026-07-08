@@ -35,11 +35,7 @@ bool AndroidMediaCodec::init(const char *mime, int width, int height) {
     }
 
     // Create and configure MediaCodec
-    codec_ = AMediaCodec_createCodecByName("c2.qti.hevc.decoder");
-    if (!codec_) {
-        // Fallback: try decoder by mime type
-        codec_ = AMediaCodec_createDecoderByType(mime);
-    }
+    codec_ = AMediaCodec_createDecoderByType(mime);
     if (!codec_) {
         NF_LOGE("AndroidMediaCodec", "AMediaCodec_createDecoderByType failed for %s", mime);
         ANativeWindow_release(window_);

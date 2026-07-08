@@ -144,13 +144,14 @@ private:
     AVColorRange current_color_range_ = AVCOL_RANGE_UNSPECIFIED;
     bool local_capture_mode_ = false;
 #ifdef __ANDROID__
-    AndroidMediaCodec *native_codec_ = nullptr;
+    std::atomic<AndroidMediaCodec *> native_codec_{nullptr};
     // Compute pipeline for YCbCr → RGBA conversion
     RID compute_shader_;
     RID compute_pipeline_;
     RID dummy_sampler_;
     RID rgba_output_tex_;
-    bool compute_pipeline_ready_ = false;
+    std::atomic<bool> compute_pipeline_ready_{false};
+    bool display_wired_ = false;
     int native_video_width_ = 0;
     int native_video_height_ = 0;
     void _ensure_compute_pipeline(RenderingDevice *rd, int width, int height);
