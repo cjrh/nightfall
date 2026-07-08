@@ -19,8 +19,8 @@ bool AndroidMediaCodec::init(const char *mime, int width, int height) {
 
     // Create ImageReader with GPU sampling usage for direct Vulkan import
     media_status_t status = AImageReader_newWithUsage(
-        width, height, AIMAGE_FORMAT_YUV_420_888,
-        AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, 4, &reader_);
+        width_, height_, AIMAGE_FORMAT_YUV_420_888,
+        AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, 4, &reader_);
     if (status != AMEDIA_OK || !reader_) {
         NF_LOGE("AndroidMediaCodec", "AImageReader_newWithUsage failed: %d", status);
         return false;

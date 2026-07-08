@@ -1,5 +1,5 @@
 diff --git a/drivers/vulkan/rendering_device_driver_vulkan.cpp b/drivers/vulkan/rendering_device_driver_vulkan.cpp
-index 4b1bd9f..6b1a564 100644
+index 4b1bd9f..85040a9 100644
 --- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
 +++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
 @@ -582,6 +582,9 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
@@ -12,7 +12,7 @@ index 4b1bd9f..6b1a564 100644
  	_register_requested_device_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, false);
  	_register_requested_device_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, false);
  	_register_requested_device_extension(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME, false);
-@@ -2479,6 +2482,157 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
+@@ -2479,6 +2482,186 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
  	return TextureID(tex_info);
  }
  
@@ -39,7 +39,7 @@ index 4b1bd9f..6b1a564 100644
 +	ycbcr_info.format = VK_FORMAT_UNDEFINED; // External format
 +	ycbcr_info.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709;
 +	ycbcr_info.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_NARROW;
-+	ycbcr_info.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
++	ycbcr_info.components = { VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_IDENTITY };
 +	ycbcr_info.xChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
 +	ycbcr_info.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
 +	ycbcr_info.chromaFilter = VK_FILTER_LINEAR;
@@ -82,6 +82,7 @@ index 4b1bd9f..6b1a564 100644
 +	}
 +
 +	// Import the AHB memory and bind to the image
++	VkDeviceMemory memory = VK_NULL_HANDLE;
 +	{
 +		VkMemoryRequirements mem_req;
 +		vkGetImageMemoryRequirements(vk_device, vk_image, &mem_req);
@@ -113,7 +114,6 @@ index 4b1bd9f..6b1a564 100644
 +		}
 +		alloc_info.memoryTypeIndex = mem_type_idx;
 +
-+		VkDeviceMemory memory = VK_NULL_HANDLE;
 +		err = vkAllocateMemory(vk_device, &alloc_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE_MEMORY), &memory);
 +		if (err) {
 +			vkDestroyImage(vk_device, vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
@@ -129,7 +129,6 @@ index 4b1bd9f..6b1a564 100644
 +			ERR_FAIL_COND_V_MSG(err, TextureID(), vformat("vkBindImageMemory for AHB failed: %d", err));
 +		}
 +
-+		// Memory will be freed when the VkDevice is destroyed.
 +	}
 +
 +	// Create image view with VK_FORMAT_UNDEFINED to match the external format image.
@@ -158,19 +157,49 @@ index 4b1bd9f..6b1a564 100644
 +	tex_info->rd_format = p_format;
 +	tex_info->vk_create_info = image_create_info;
 +	tex_info->vk_view_create_info = view_ci;
-+	tex_info->is_ycbcr = true;
-+	tex_info->ycbcr_conversion = ycbcr_conversion;
 +#ifdef DEBUG_ENABLED
 +	tex_info->created_from_extension = true;
 +#endif
++	tex_info->is_ycbcr = true;
++	tex_info->ycbcr_conversion = ycbcr_conversion;
++	tex_info->ycbcr_memory = memory;
 +	return TextureID(tex_info);
++}
++
++RDD::SamplerID RenderingDeviceDriverVulkan::sampler_create_from_texture(RDD::TextureID p_texture) {
++	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
++	ERR_FAIL_NULL_V(tex_info, SamplerID());
++	ERR_FAIL_COND_V_MSG(!tex_info->is_ycbcr, SamplerID(), "Texture is not a YCbCr texture");
++	ERR_FAIL_COND_V_MSG(tex_info->ycbcr_conversion == VK_NULL_HANDLE, SamplerID(), "Texture has no YCbCr conversion");
++
++	VkSamplerYcbcrConversionInfo ycbcr_sampler_info = {};
++	ycbcr_sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
++	ycbcr_sampler_info.conversion = tex_info->ycbcr_conversion;
++
++	VkSamplerCreateInfo sampler_ci = {};
++	sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
++	sampler_ci.pNext = &ycbcr_sampler_info;
++	sampler_ci.magFilter = VK_FILTER_LINEAR;
++	sampler_ci.minFilter = VK_FILTER_LINEAR;
++	sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
++	sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
++	sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
++	sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
++	sampler_ci.minLod = 0.0f;
++	sampler_ci.maxLod = 1.0f;
++
++	VkSampler vk_sampler = VK_NULL_HANDLE;
++	VkResult err = vkCreateSampler(vk_device, &sampler_ci, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER), &vk_sampler);
++	ERR_FAIL_COND_V_MSG(err, SamplerID(), vformat("vkCreateSampler for YCbCr failed: %d", err));
++
++	return SamplerID((uint64_t)vk_sampler);
 +}
 +#endif
 +
  RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared(TextureID p_original_texture, const TextureView &p_view) {
  	const TextureInfo *owner_tex_info = (const TextureInfo *)p_original_texture.id;
  #ifdef DEBUG_ENABLED
-@@ -2592,6 +2746,16 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
+@@ -2592,6 +2775,22 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
  void RenderingDeviceDriverVulkan::texture_free(TextureID p_texture) {
  	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
  	vkDestroyImageView(vk_device, tex_info->vk_view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW));
@@ -183,11 +212,17 @@ index 4b1bd9f..6b1a564 100644
 +		vkDestroySamplerYcbcrConversion(vk_device, tex_info->ycbcr_conversion, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION));
 +		tex_info->ycbcr_conversion = VK_NULL_HANDLE;
 +	}
++	if (tex_info->ycbcr_memory != VK_NULL_HANDLE) {
++		vkDestroyImage(vk_device, tex_info->vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
++		vkFreeMemory(vk_device, tex_info->ycbcr_memory, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE_MEMORY));
++		tex_info->ycbcr_memory = VK_NULL_HANDLE;
++		tex_info->vk_image = VK_NULL_HANDLE;
++	}
 +#endif
  	if (tex_info->allocation.handle) {
  		if (!Engine::get_singleton()->is_extra_gpu_memory_tracking_enabled()) {
  			vmaDestroyImage(allocator, tex_info->vk_view_create_info.image, tex_info->allocation.handle);
-@@ -4704,25 +4868,54 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
+@@ -4704,25 +4903,54 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
  					vk_writes[writes_amount].pImageInfo = vk_img_infos;
  				}
  			} break;
@@ -255,10 +290,10 @@ index 4b1bd9f..6b1a564 100644
  				num_descriptors = uniform.ids.size();
  				VkDescriptorImageInfo *vk_img_infos = ALLOCA_ARRAY(VkDescriptorImageInfo, num_descriptors);
 diff --git a/drivers/vulkan/rendering_device_driver_vulkan.h b/drivers/vulkan/rendering_device_driver_vulkan.h
-index 6d17386..bc84021 100644
+index 6d17386..dedd101 100644
 --- a/drivers/vulkan/rendering_device_driver_vulkan.h
 +++ b/drivers/vulkan/rendering_device_driver_vulkan.h
-@@ -284,6 +284,11 @@ public:
+@@ -284,6 +284,12 @@ public:
  			VmaAllocationInfo info = {};
  		} allocation; // All 0/null if just a view.
  		bool is_subsampled = false;
@@ -266,25 +301,27 @@ index 6d17386..bc84021 100644
 +		bool is_ycbcr = false;
 +		VkSamplerYcbcrConversion ycbcr_conversion = VK_NULL_HANDLE;
 +		VkSampler ycbcr_sampler = VK_NULL_HANDLE;
++		VkDeviceMemory ycbcr_memory = VK_NULL_HANDLE;
 +#endif
  #ifdef DEBUG_ENABLED
  		bool created_from_extension = false;
  		bool transient = false;
-@@ -295,6 +300,9 @@ public:
+@@ -295,6 +301,10 @@ public:
  public:
  	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) override final;
  	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) override final;
 +#ifdef ANDROID_ENABLED
 +	virtual TextureID texture_create_from_android_hardware_buffer(void *p_buffer, DataFormat p_format, uint32_t p_width, uint32_t p_height, BitField<TextureUsageBits> p_usage) override final;
++	virtual SamplerID sampler_create_from_texture(TextureID p_texture) override final;
 +#endif
  	virtual TextureID texture_create_shared(TextureID p_original_texture, const TextureView &p_view) override final;
  	virtual TextureID texture_create_shared_from_slice(TextureID p_original_texture, const TextureView &p_view, TextureSliceType p_slice_type, uint32_t p_layer, uint32_t p_layers, uint32_t p_mipmap, uint32_t p_mipmaps) override final;
  	virtual void texture_free(TextureID p_texture) override final;
 diff --git a/servers/rendering/rendering_device.cpp b/servers/rendering/rendering_device.cpp
-index 7574038..2d34078 100644
+index 7574038..9359821 100644
 --- a/servers/rendering/rendering_device.cpp
 +++ b/servers/rendering/rendering_device.cpp
-@@ -1892,6 +1892,39 @@ RID RenderingDevice::texture_create_from_extension(TextureType p_type, DataForma
+@@ -1892,6 +1892,49 @@ RID RenderingDevice::texture_create_from_extension(TextureType p_type, DataForma
  
  	return id;
  }
@@ -320,44 +357,57 @@ index 7574038..2d34078 100644
 +
 +	return id;
 +}
++
++RID RenderingDevice::texture_get_ycbcr_sampler(RID p_texture) {
++	Texture *texture = texture_owner.get_or_null(p_texture);
++	ERR_FAIL_NULL_V(texture, RID());
++
++	RDD::SamplerID driver_sampler = driver->sampler_create_from_texture(texture->driver_id);
++	ERR_FAIL_COND_V(!driver_sampler, RID());
++
++	return sampler_owner.make_rid(driver_sampler);
++}
 +#endif
  
  RID RenderingDevice::texture_create_shared_from_slice(const TextureView &p_view, RID p_with_texture, uint32_t p_layer, uint32_t p_mipmap, uint32_t p_mipmaps, TextureSliceType p_slice_type, uint32_t p_layers) {
  	Texture *src_texture = texture_owner.get_or_null(p_with_texture);
-@@ -9054,6 +9087,9 @@ void RenderingDevice::_bind_methods() {
+@@ -9054,6 +9097,10 @@ void RenderingDevice::_bind_methods() {
  	ClassDB::bind_method(D_METHOD("texture_create_shared", "view", "with_texture"), &RenderingDevice::_texture_create_shared);
  	ClassDB::bind_method(D_METHOD("texture_create_shared_from_slice", "view", "with_texture", "layer", "mipmap", "mipmaps", "slice_type"), &RenderingDevice::_texture_create_shared_from_slice, DEFVAL(1), DEFVAL(TEXTURE_SLICE_2D));
  	ClassDB::bind_method(D_METHOD("texture_create_from_extension", "type", "format", "samples", "usage_flags", "image", "width", "height", "depth", "layers", "mipmaps"), &RenderingDevice::texture_create_from_extension, DEFVAL(1));
 +#ifdef ANDROID_ENABLED
 +	ClassDB::bind_method(D_METHOD("texture_create_from_android_hardware_buffer", "buffer", "format", "width", "height", "usage_flags"), &RenderingDevice::texture_create_from_android_hardware_buffer);
++	ClassDB::bind_method(D_METHOD("texture_get_ycbcr_sampler", "texture"), &RenderingDevice::texture_get_ycbcr_sampler);
 +#endif
  
  	ClassDB::bind_method(D_METHOD("texture_update", "texture", "layer", "data"), &RenderingDevice::texture_update);
  	ClassDB::bind_method(D_METHOD("texture_get_data", "texture", "layer"), &RenderingDevice::texture_get_data);
 diff --git a/servers/rendering/rendering_device.h b/servers/rendering/rendering_device.h
-index 38c4b14..f2e9296 100644
+index 38c4b14..b1c90e8 100644
 --- a/servers/rendering/rendering_device.h
 +++ b/servers/rendering/rendering_device.h
-@@ -463,6 +463,9 @@ public:
+@@ -463,6 +463,10 @@ public:
  	RID texture_create(const TextureFormat &p_format, const TextureView &p_view, const Vector<Vector<uint8_t>> &p_data = Vector<Vector<uint8_t>>());
  	RID texture_create_shared(const TextureView &p_view, RID p_with_texture);
  	RID texture_create_from_extension(TextureType p_type, DataFormat p_format, TextureSamples p_samples, BitField<RenderingDevice::TextureUsageBits> p_usage, uint64_t p_image, uint64_t p_width, uint64_t p_height, uint64_t p_depth, uint64_t p_layers, uint64_t p_mipmaps = 1);
 +#ifdef ANDROID_ENABLED
 +	RID texture_create_from_android_hardware_buffer(uint64_t p_buffer, DataFormat p_format, uint32_t p_width, uint32_t p_height, BitField<TextureUsageBits> p_usage);
++	RID texture_get_ycbcr_sampler(RID p_texture);
 +#endif
  	RID texture_create_shared_from_slice(const TextureView &p_view, RID p_with_texture, uint32_t p_layer, uint32_t p_mipmap, uint32_t p_mipmaps = 1, TextureSliceType p_slice_type = TEXTURE_SLICE_2D, uint32_t p_layers = 0);
  	Error texture_update(RID p_texture, uint32_t p_layer, const Vector<uint8_t> &p_data);
  	Vector<uint8_t> texture_get_data(RID p_texture, uint32_t p_layer); // CPU textures will return immediately, while GPU textures will most likely force a flush
 diff --git a/servers/rendering/rendering_device_driver.h b/servers/rendering/rendering_device_driver.h
-index 103bd99..b27d2a0 100644
+index 103bd99..8a993a1 100644
 --- a/servers/rendering/rendering_device_driver.h
 +++ b/servers/rendering/rendering_device_driver.h
-@@ -279,6 +279,9 @@ public:
+@@ -279,6 +279,10 @@ public:
  
  	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) = 0;
  	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) = 0;
 +#ifdef ANDROID_ENABLED
 +	virtual TextureID texture_create_from_android_hardware_buffer(void *p_buffer, DataFormat p_format, uint32_t p_width, uint32_t p_height, BitField<TextureUsageBits> p_usage) = 0;
++	virtual SamplerID sampler_create_from_texture(TextureID p_texture) = 0;
 +#endif
  	// texture_create_shared_*() can only use original, non-view textures as original. RenderingDevice is responsible for ensuring that.
  	virtual TextureID texture_create_shared(TextureID p_original_texture, const TextureView &p_view) = 0;

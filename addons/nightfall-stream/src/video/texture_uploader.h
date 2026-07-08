@@ -52,11 +52,15 @@ private:
     void _render_thread_setup_bgra(int width, int height);
     void _render_thread_import_native(RID p_tex_rid, int p_width, int p_height);
     void _render_thread_cleanup();
+    void _render_thread_import_native_rt(); // Zero-arg version for call_on_render_thread (no .bind RID issues)
 
     RenderingDevice *rd = nullptr;
     RID rd_texture_rid[3];
     RID rs_texture_rid[3];
     Ref<Texture2DRD> rd_texture_wrappers[3];
+    // Pending state for _render_thread_import_native_rt
+    RID pending_native_rid_;
+    int pending_native_width_ = 0, pending_native_height_ = 0;
     PackedByteArray rd_texture_buffers[3];
 
     Ref<Image> plane_images[3];

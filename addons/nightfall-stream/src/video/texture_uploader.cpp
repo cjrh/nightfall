@@ -29,11 +29,26 @@ void TextureUploader::set_texture_from_native_rid(RID p_tex_rid, int p_width, in
     RenderingServer *rs = RenderingServer::get_singleton();
     if (!rs) return;
 
+    // Store pending state to avoid .bind(RID) issues with call_on_render_thread
+    pending_native_rid_ = p_tex_rid;
+    pending_native_width_ = p_width;
+    pending_native_height_ = p_height;
+
     // Queue render thread setup to replace textures
-    rs->call_on_render_thread(callable_mp(this, &TextureUploader::_render_thread_import_native).bind(p_tex_rid, p_width, p_height));
+    rs->call_on_render_thread(callable_mp(this, &TextureUploader::_render_thread_import_native_rt));
 }
 
 void TextureUploader::_render_thread_import_native(RID p_tex_rid, int p_width, int p_height) {
+    // Original version with bound args - kept for reference
+}
+
+void TextureUploader::_render_thread_import_native_rt() {
+    // Read pending state (avoids .bind(RID) issues with call_on_render_thread)
+    RID p_tex_rid = pending_native_rid_;
+    int p_width = pending_native_width_;
+    int p_height = pending_native_height_;
+    if (!p_tex_rid.is_valid()) return;
+
     std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
 
     RenderingServer *rs = RenderingServer::get_singleton();
@@ -57,27 +72,31 @@ void TextureUploader::_render_thread_import_native(RID p_tex_rid, int p_width, i
     // Use the imported texture directly
     rd_texture_rid[0] = p_tex_rid;
     rs_texture_rid[0] = rs->texture_rd_create(p_tex_rid);
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "import_native_rt: rs_tex valid=%d",
+        (int)rs_texture_rid[0].is_valid());
 
     if (rd_texture_wrappers[0].is_null())
         rd_texture_wrappers[0].instantiate();
     rd_texture_wrappers[0]->set_texture_rd_rid(p_tex_rid);
 
-    // Set shader to passthrough mode (YCbCr conversion is done by hardware sampler)
     ensure_shader_material();
     if (shader_material.is_valid()) {
         shader_material->set_shader_parameter("tex_y", rd_texture_wrappers[0]);
         shader_material->set_shader_parameter("is_semi_planar", false);
         shader_material->set_shader_parameter("is_nv12_rd", false);
-        shader_material->set_shader_parameter("color_matrix_type", 3); // Passthrough
+        shader_material->set_shader_parameter("color_matrix_type", 3);
         shader_material->set_shader_parameter("color_range", 1);
         shader_material->set_shader_parameter("swap_uv", false);
     }
 
-    // Mark new frame available immediately (texture is already on GPU, no upload needed)
     new_frame_available_.store(true);
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "import_native_rt: complete");
 
     current_width = p_width;
     current_height = p_height;
+
+    // Clear pending state
+    pending_native_rid_ = RID();
 }
 
 void TextureUploader::ensure_shader_material() {

@@ -291,11 +291,17 @@ func _update_yuv_shader_params():
 	var mat = _v2_yuv_rect.material
 	if not mat is ShaderMaterial:
 		return
-	if local_capture_mode:
-		mat.set_shader_parameter("color_matrix_type", 3)
-		mat.set_shader_parameter("color_range", 1)
-		mat.set_shader_parameter("is_semi_planar", false)
-		mat.set_shader_parameter("is_nv12_rd", false)
+	# Always set passthrough mode for compute shader RGBA output
+	mat.set_shader_parameter("color_matrix_type", 3)
+	mat.set_shader_parameter("color_range", 1)
+	mat.set_shader_parameter("is_semi_planar", false)
+	mat.set_shader_parameter("is_nv12_rd", false)
+	if not local_capture_mode:
+		var um = main.stream_backend.get_shader_material()
+		if um:
+			var tex = um.get_shader_parameter("tex_y")
+			if tex != null:
+				mat.set_shader_parameter("tex_y", tex)
 
 func teardown_v2_yuv_rect():
 	if _v2_yuv_rect:
@@ -311,6 +317,7 @@ func update_stats():
 	if not _v2_yuv_rect:
 		_setup_v2_yuv_rect()
 	_update_yuv_shader_params()
+	main._bind_yuv_textures()  # Re-bind after compute pipeline may have updated tex_y
 	var new_frame = _b().consume_new_frame()
 	var vw = _b().get_video_width()
 	var vh = _b().get_video_height()

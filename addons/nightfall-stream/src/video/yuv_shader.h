@@ -4,7 +4,7 @@ static const char *YUV_SHADER_CODE = R"(
 shader_type canvas_item;
 render_mode unshaded;
 
-uniform sampler2D tex_y : filter_linear, repeat_disable;
+uniform sampler2D tex_y : filter_linear, repeat_disable, hint_default_white;
 uniform sampler2D tex_u : filter_linear, repeat_disable;
 uniform sampler2D tex_v : filter_linear, repeat_disable;
 
