@@ -72,8 +72,10 @@ void TextureUploader::_render_thread_import_native_rt() {
     // Use the imported texture directly
     rd_texture_rid[0] = p_tex_rid;
     rs_texture_rid[0] = rs->texture_rd_create(p_tex_rid);
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "import_native_rt: rs_tex valid=%d",
         (int)rs_texture_rid[0].is_valid());
+#endif
 
     if (rd_texture_wrappers[0].is_null())
         rd_texture_wrappers[0].instantiate();
@@ -90,7 +92,9 @@ void TextureUploader::_render_thread_import_native_rt() {
     }
 
     new_frame_available_.store(true);
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "import_native_rt: complete");
+#endif
 
     current_width = p_width;
     current_height = p_height;

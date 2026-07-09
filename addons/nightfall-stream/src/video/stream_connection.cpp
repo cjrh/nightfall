@@ -1361,13 +1361,17 @@ String StreamConnection::get_decoder_name() const {
 
 int StreamConnection::get_video_width() const {
     if (decoder_.is_valid() && decoder_->get_video_width() > 0) return decoder_->get_video_width();
+#ifdef __ANDROID__
     if (native_video_width_ > 0) return native_video_width_;
+#endif
     return 0;
 }
 
 int StreamConnection::get_video_height() const {
     if (decoder_.is_valid() && decoder_->get_video_height() > 0) return decoder_->get_video_height();
+#ifdef __ANDROID__
     if (native_video_height_ > 0) return native_video_height_;
+#endif
     return 0;
 }
 
