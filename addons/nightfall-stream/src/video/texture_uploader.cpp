@@ -8,6 +8,8 @@ using namespace godot;
 
 TextureUploader::TextureUploader() {
     texture_mutex.instantiate();
+    pending_native_width_ = 0;
+    pending_native_height_ = 0;
 }
 
 TextureUploader::~TextureUploader() {

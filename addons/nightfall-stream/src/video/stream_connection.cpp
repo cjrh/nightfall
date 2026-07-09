@@ -59,6 +59,15 @@ StreamConnection::StreamConnection() {
     audio_renderer_.instantiate();
     input_bridge_.instantiate();
     depth_bridge_.instantiate();
+#ifdef __ANDROID__
+    compute_pipeline_ready_.store(false);
+    display_wired_ = false;
+    native_video_width_ = 0;
+    native_video_height_ = 0;
+    pending_ahb_ptr_ = 0;
+    pending_width_ = 0;
+    pending_height_ = 0;
+#endif
 }
 
 StreamConnection::~StreamConnection() {
