@@ -181,7 +181,7 @@ var comp_shader_mat_right: ShaderMaterial = null
 var use_comp_layer: bool = false
 var _dim_texture: ImageTexture = null
 var _dim_material: ShaderMaterial = null
-var _screen_mesh_saved_mat: Material = null
+var _dim_saved_mat: Material = null
 var comp_stream_cursor: TextureRect = null
 var comp_stream_cursor_circle: ColorRect = null
 var comp_stream_cursor_left: TextureRect = null
@@ -926,16 +926,20 @@ func _dim_screen():
 	if not _dim_material:
 		_dim_material = ShaderMaterial.new()
 		var shader = Shader.new()
-		shader.code = "shader_type canvas_item;\nrender_mode unshaded;\nvoid fragment() { COLOR = vec4(0.06, 0.06, 0.06, 1.0); }"
+		shader.code = """shader_type canvas_item;
+render_mode unshaded;
+void fragment() {
+	COLOR = vec4(0.06, 0.06, 0.06, 1.0);
+}"""
 		_dim_material.shader = shader
 	if screen_mesh.material_override != _dim_material:
-		_screen_mesh_saved_mat = screen_mesh.material_override
+		_dim_saved_mat = screen_mesh.material_override
 		screen_mesh.material_override = _dim_material
 
 func _undim_screen():
-	if screen_mesh.material_override == _dim_material and _screen_mesh_saved_mat:
-		screen_mesh.material_override = _screen_mesh_saved_mat
-		_screen_mesh_saved_mat = null
+	if screen_mesh.material_override == _dim_material and _dim_saved_mat:
+		screen_mesh.material_override = _dim_saved_mat
+		_dim_saved_mat = null
 
 func _bind_yuv_textures():
 	var mat = stream_backend.get_shader_material()
