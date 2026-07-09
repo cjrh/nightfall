@@ -179,9 +179,6 @@ var comp_bezel_rect_right: ColorRect = null
 var comp_shader_mat_left: ShaderMaterial = null
 var comp_shader_mat_right: ShaderMaterial = null
 var use_comp_layer: bool = false
-var _dim_texture: ImageTexture = null
-var _dim_material: ShaderMaterial = null
-var _dim_saved_mat: Material = null
 var comp_stream_cursor: TextureRect = null
 var comp_stream_cursor_circle: ColorRect = null
 var comp_stream_cursor_left: TextureRect = null
@@ -922,25 +919,6 @@ func _on_connect_timeout():
 	welcome_screen.reset_connect_button()
 	stream_backend.stop_play_stream()
 
-func _dim_screen():
-	if not _dim_material:
-		_dim_material = ShaderMaterial.new()
-		var shader = Shader.new()
-		shader.code = """shader_type canvas_item;
-render_mode unshaded;
-void fragment() {
-	COLOR = vec4(0.06, 0.06, 0.06, 1.0);
-}"""
-		_dim_material.shader = shader
-	if screen_mesh.material_override != _dim_material:
-		_dim_saved_mat = screen_mesh.material_override
-		screen_mesh.material_override = _dim_material
-
-func _undim_screen():
-	if screen_mesh.material_override == _dim_material and _dim_saved_mat:
-		screen_mesh.material_override = _dim_saved_mat
-		_dim_saved_mat = null
-
 func _bind_yuv_textures():
 	var mat = stream_backend.get_shader_material()
 	if not mat:
@@ -975,16 +953,12 @@ func _bind_yuv_textures():
 			screen_mesh.material_override.set_shader_parameter("yuv_mode", yuv_mode_val)
 		_log("[YUV] Direct YUV binding: mode=%d nv12_rd=%s semi_planar=%s" % [yuv_mode_val, str(is_nv12_rd), str(is_semi_planar)])
 		_bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode_val, cmt, cr)
-		_undim_screen()  # Restore normal display after reconfig
 	else:
-		# Dark grey placeholder during reconfiguration
-		if not _dim_texture:
-			var img = Image.create(1, 1, false, Image.FORMAT_RGB8)
-			img.fill(Color(0.06, 0.06, 0.06))
-			_dim_texture = ImageTexture.create_from_image(img)
+		var stream_tex = stream_viewport.get_texture()
 		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
-			screen_mesh.material_override.set_shader_parameter("main_texture", _dim_texture)
+			screen_mesh.material_override.set_shader_parameter("main_texture", stream_tex)
 			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
+		_bind_comp_fallback_texture(stream_tex)
 
 func _bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode: int, cmt, cr):
 	var mats = [comp_shader_mat, comp_shader_mat_left, comp_shader_mat_right]
