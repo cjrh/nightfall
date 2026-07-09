@@ -154,13 +154,21 @@ private:
     bool display_wired_ = false;
     int native_video_width_ = 0;
     int native_video_height_ = 0;
+    int native_color_range_ = 0;
+    int native_color_matrix_type_ = 0;
     void _ensure_compute_pipeline(RenderingDevice *rd, int width, int height);
     void _render_compute_dispatch(RID ycbcr_tex_rid, RID ycbcr_sampler_rid, uint64_t ahb_ptr, int width, int height);
     void _render_compute_dispatch_rt(); // Called on render thread, reads pending_ members
+    void _render_free_pipeline_rt(); // Called on render thread, frees old pipeline resources
     RID pending_ycbcr_tex_rid_;
     RID pending_ycbcr_sampler_rid_;
+    RID pending_free_pipeline_;
+    RID pending_free_shader_;
+    RID pending_free_sampler_;
+    RID pending_free_tex_;
     uint64_t pending_ahb_ptr_ = 0;
     int pending_width_ = 0, pending_height_ = 0;
+    int pending_color_range_ = 0, pending_color_matrix_type_ = 0;
     std::mutex pending_mutex_;
 #endif
 };

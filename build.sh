@@ -166,6 +166,12 @@ rm -rf android/build
 mkdir -p android/build
 cd android/build
 unzip -q "$TEMPLATES"
+# Replace Godot .so with patched version (AHB Vulkan patch for Quest)
+# Cover all locations the Gradle build might pick up the .so from
+cp "$SCRIPT_DIR/addons/nightfall-stream/bin/android/libgodot_android.so" aar_extract/jni/arm64-v8a/libgodot_android.so 2>/dev/null || true
+mkdir -p libs/release/arm64-v8a libs/debug/arm64-v8a
+cp "$SCRIPT_DIR/addons/nightfall-stream/bin/android/libgodot_android.so" libs/release/arm64-v8a/libgodot_android.so 2>/dev/null || true
+cp "$SCRIPT_DIR/addons/nightfall-stream/bin/android/libgodot_android.so" libs/debug/arm64-v8a/libgodot_android.so 2>/dev/null || true
 cd "$SCRIPT_DIR"
 cp android/src/main/java/com/godot/game/GodotApp.java android/build/src/main/java/com/godot/game/GodotApp.java
 cp android/src/main/java/com/godot/game/DepthEstimator.java android/build/src/main/java/com/godot/game/DepthEstimator.java

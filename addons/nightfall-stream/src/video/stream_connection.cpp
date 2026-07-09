@@ -64,9 +64,13 @@ StreamConnection::StreamConnection() {
     display_wired_ = false;
     native_video_width_ = 0;
     native_video_height_ = 0;
+    native_color_range_ = 0;
+    native_color_matrix_type_ = 0;
     pending_ahb_ptr_ = 0;
     pending_width_ = 0;
     pending_height_ = 0;
+    pending_color_range_ = 0;
+    pending_color_matrix_type_ = 0;
 #endif
 }
 
@@ -221,12 +225,27 @@ void StreamConnection::_render_compute_dispatch_rt() {
         rd->compute_list_bind_compute_pipeline(cmd, compute_pipeline_);
         rd->compute_list_bind_uniform_set(cmd, uniform_set, 0);
 
+        uint32_t pc_data[4];
+        pc_data[0] = (uint32_t)width;
+        pc_data[1] = (uint32_t)height;
+
+        uint32_t color_range = 0;
+        if (stream_config_.colorRange == COLOR_RANGE_FULL) {
+            color_range = 1;
+        }
+        uint32_t color_matrix = 1;
+        if (stream_config_.colorSpace == COLORSPACE_REC_601) {
+            color_matrix = 0;
+        } else if (stream_config_.colorSpace == COLORSPACE_REC_2020) {
+            color_matrix = 2;
+        }
+        pc_data[2] = color_range;
+        pc_data[3] = color_matrix;
+
         PackedByteArray push_constants;
-        push_constants.resize(8);
-        uint32_t *pc = (uint32_t *)push_constants.ptrw();
-        pc[0] = (uint32_t)width;
-        pc[1] = (uint32_t)height;
-        rd->compute_list_set_push_constant(cmd, push_constants, 8);
+        push_constants.resize(16);
+        memcpy(push_constants.ptrw(), pc_data, 16);
+        rd->compute_list_set_push_constant(cmd, push_constants, 16);
 
         rd->compute_list_dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
         rd->compute_list_end();
@@ -262,6 +281,17 @@ void StreamConnection::_render_compute_dispatch_rt() {
     AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
     static int rt_done = 0;
     if (++rt_done <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: dispatch complete");
+}
+
+void StreamConnection::_render_free_pipeline_rt() {
+    RenderingDevice *rd = RenderingServer::get_singleton()
+        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    if (!rd) return;
+
+    if (pending_free_pipeline_.is_valid()) { rd->free_rid(pending_free_pipeline_); pending_free_pipeline_ = RID(); }
+    if (pending_free_shader_.is_valid()) { rd->free_rid(pending_free_shader_); pending_free_shader_ = RID(); }
+    if (pending_free_sampler_.is_valid()) { rd->free_rid(pending_free_sampler_); pending_free_sampler_ = RID(); }
+    if (pending_free_tex_.is_valid()) { rd->free_rid(pending_free_tex_); pending_free_tex_ = RID(); }
 }
 #endif
 
@@ -409,16 +439,25 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     }
 
     // Reset compute pipeline state for reconfiguration
-    RenderingDevice *rd = RenderingServer::get_singleton()
-        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
-    if (rd) {
-        if (self->compute_pipeline_.is_valid()) rd->free_rid(self->compute_pipeline_);
-        if (self->compute_shader_.is_valid()) rd->free_rid(self->compute_shader_);
-        if (self->dummy_sampler_.is_valid()) rd->free_rid(self->dummy_sampler_);
-        if (self->rgba_output_tex_.is_valid()) rd->free_rid(self->rgba_output_tex_);
-    }
+    // IMPORTANT: set compute_pipeline_ready_ = false FIRST so queued render-thread
+    // callbacks will bail out before using resources we're about to free.
     self->compute_pipeline_ready_ = false;
     self->display_wired_ = false;
+
+    // Free GPU resources on render thread to guarantee no pending callbacks use them
+    RenderingServer *rs = RenderingServer::get_singleton();
+    RenderingDevice *rd = rs ? rs->get_rendering_device() : nullptr;
+    if (rd) {
+        self->pending_free_pipeline_ = self->compute_pipeline_;
+        self->pending_free_shader_ = self->compute_shader_;
+        self->pending_free_sampler_ = self->dummy_sampler_;
+        self->pending_free_tex_ = self->rgba_output_tex_;
+        self->compute_pipeline_ = RID();
+        self->compute_shader_ = RID();
+        self->dummy_sampler_ = RID();
+        self->rgba_output_tex_ = RID();
+        rs->call_on_render_thread(callable_mp(self, &StreamConnection::_render_free_pipeline_rt));
+    }
 
     const char *mime = nullptr;
     if (videoFormat & VIDEO_FORMAT_MASK_H265) {
