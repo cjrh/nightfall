@@ -180,7 +180,53 @@ void StreamConnection::_render_compute_dispatch_rt() {
         return;
     }
 
-    // One-time per session: create RS texture wrapper for canvas display (must be on render thread)
+    // Dispatch compute shader FIRST (so rgba_output_tex_ has valid data before display)
+    {
+        // Build uniform set
+        Ref<RDUniform> u_sampler;
+        u_sampler.instantiate();
+        u_sampler->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
+        u_sampler->set_binding(0);
+        u_sampler->add_id(ycbcr_sampler_rid);
+        u_sampler->add_id(ycbcr_tex_rid);
+
+        Ref<RDUniform> u_output;
+        u_output.instantiate();
+        u_output->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
+        u_output->set_binding(1);
+        u_output->add_id(rgba_output_tex_);
+
+        TypedArray<RDUniform> uniforms;
+        uniforms.append(u_sampler);
+        uniforms.append(u_output);
+
+        RID uniform_set = rd->uniform_set_create(uniforms, compute_shader_, 0);
+        if (!uniform_set.is_valid()) {
+            rd->free_rid(ycbcr_sampler_rid);
+            rd->free_rid(ycbcr_tex_rid);
+            AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
+            return;
+        }
+
+        int64_t cmd = rd->compute_list_begin();
+        rd->compute_list_bind_compute_pipeline(cmd, compute_pipeline_);
+        rd->compute_list_bind_uniform_set(cmd, uniform_set, 0);
+
+        PackedByteArray push_constants;
+        push_constants.resize(8);
+        uint32_t *pc = (uint32_t *)push_constants.ptrw();
+        pc[0] = (uint32_t)width;
+        pc[1] = (uint32_t)height;
+        rd->compute_list_set_push_constant(cmd, push_constants, 8);
+
+        rd->compute_list_dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
+        rd->compute_list_end();
+
+        rd->free_rid(uniform_set);
+    }
+
+    // One-time per session AFTER first compute dispatch: wire display to rgba_output_tex_
+    // (must be after dispatch so texture has valid video data, not uninitialized white)
     if (!display_wired_ && rgba_output_tex_.is_valid()) {
         display_wired_ = true;
         RenderingServer *rs = RenderingServer::get_singleton();
@@ -195,57 +241,12 @@ void StreamConnection::_render_compute_dispatch_rt() {
                 mat->set_shader_parameter("color_range", 1);
                 mat->set_shader_parameter("is_nv12_rd", false);
                 mat->set_shader_parameter("is_semi_planar", false);
-                __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: tex_y=%s set on uploader", rs_tex.is_valid() ? "ok" : "fail");
+                __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: tex_y set AFTER compute dispatch");
             }
         }
     }
 
-    static int rt_disp = 0;
-    if (++rt_disp <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: dispatching compute %dx%d", width, height);
-
-    // Build uniform set
-    Ref<RDUniform> u_sampler;
-    u_sampler.instantiate();
-    u_sampler->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
-    u_sampler->set_binding(0);
-    u_sampler->add_id(ycbcr_sampler_rid);
-    u_sampler->add_id(ycbcr_tex_rid);
-
-    Ref<RDUniform> u_output;
-    u_output.instantiate();
-    u_output->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
-    u_output->set_binding(1);
-    u_output->add_id(rgba_output_tex_);
-
-    TypedArray<RDUniform> uniforms;
-    uniforms.append(u_sampler);
-    uniforms.append(u_output);
-
-    RID uniform_set = rd->uniform_set_create(uniforms, compute_shader_, 0);
-    if (!uniform_set.is_valid()) {
-        rd->free_rid(ycbcr_sampler_rid);
-        rd->free_rid(ycbcr_tex_rid);
-        AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
-        return;
-    }
-
-    // Dispatch compute shader
-    int64_t cmd = rd->compute_list_begin();
-    rd->compute_list_bind_compute_pipeline(cmd, compute_pipeline_);
-    rd->compute_list_bind_uniform_set(cmd, uniform_set, 0);
-
-    PackedByteArray push_constants;
-    push_constants.resize(8);
-    uint32_t *pc = (uint32_t *)push_constants.ptrw();
-    pc[0] = (uint32_t)width;
-    pc[1] = (uint32_t)height;
-    rd->compute_list_set_push_constant(cmd, push_constants, 8);
-
-    rd->compute_list_dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
-    rd->compute_list_end();
-
     // Cleanup
-    rd->free_rid(uniform_set);
     rd->free_rid(ycbcr_sampler_rid);
     rd->free_rid(ycbcr_tex_rid);
 
@@ -423,7 +424,8 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
             self->native_codec_.store(new_codec);
             self->native_video_width_ = width;
             self->native_video_height_ = height;
-            self->uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
+            // Only ensure shader material exists (no texture setup — compute pipeline handles it)
+            self->uploader_->ensure_shader_material();
             self->uploader_->set_active(true); // NV12 mode
             self->decoder_ready_.store(true);
             return 0;
