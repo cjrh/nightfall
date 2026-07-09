@@ -291,10 +291,11 @@ func _update_yuv_shader_params():
 	var mat = _v2_yuv_rect.material
 	if not mat is ShaderMaterial:
 		return
-	mat.set_shader_parameter("color_matrix_type", 3)
-	mat.set_shader_parameter("color_range", 1)
-	mat.set_shader_parameter("is_semi_planar", false)
-	mat.set_shader_parameter("is_nv12_rd", false)
+	if local_capture_mode or OS.get_name() == "Android":
+		mat.set_shader_parameter("color_matrix_type", 3)
+		mat.set_shader_parameter("color_range", 1)
+		mat.set_shader_parameter("is_semi_planar", false)
+		mat.set_shader_parameter("is_nv12_rd", false)
 
 func teardown_v2_yuv_rect():
 	if _v2_yuv_rect:
