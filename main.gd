@@ -186,10 +186,7 @@ var comp_stream_cursor_circle_left: ColorRect = null
 var comp_stream_cursor_right: TextureRect = null
 var comp_stream_cursor_circle_right: ColorRect = null
 var comp_layer_available: bool = false
-var _screen_mesh_saved_mat: Material = null
 var _screen_mesh_original_mat: Material = null
-var _ui_saved_mat: Material = null
-var _kb_saved_mat: Material = null
 
 var _log_lines: PackedStringArray = []
 var _ui_viewport_size := Vector2i(600, 290)
@@ -247,7 +244,7 @@ func _setup_comp_layer():
 	comp_cylinder.name = "CompCylinderLayer"
 	comp_cylinder.set_sort_order(1)
 	comp_cylinder.set_enable_hole_punch(false)
-	comp_cylinder.set_alpha_blend(true)
+	comp_cylinder.set_alpha_blend(false)
 	comp_cylinder.visible = false
 	xr_origin.add_child(comp_cylinder)
 	if comp_cylinder.is_natively_supported():
@@ -371,7 +368,7 @@ func _setup_comp_layer():
 	comp_cylinder_left.name = "CompCylinderLeft"
 	comp_cylinder_left.set_sort_order(1)
 	comp_cylinder_left.set_enable_hole_punch(false)
-	comp_cylinder_left.set_alpha_blend(true)
+	comp_cylinder_left.set_alpha_blend(false)
 	comp_cylinder_left.set_eye_visibility(OpenXRCompositionLayer.EYE_VISIBILITY_LEFT)
 	comp_cylinder_left.visible = false
 	xr_origin.add_child(comp_cylinder_left)
@@ -380,7 +377,7 @@ func _setup_comp_layer():
 	comp_cylinder_right.name = "CompCylinderRight"
 	comp_cylinder_right.set_sort_order(1)
 	comp_cylinder_right.set_enable_hole_punch(false)
-	comp_cylinder_right.set_alpha_blend(true)
+	comp_cylinder_right.set_alpha_blend(false)
 	comp_cylinder_right.set_eye_visibility(OpenXRCompositionLayer.EYE_VISIBILITY_RIGHT)
 	comp_cylinder_right.visible = false
 	xr_origin.add_child(comp_cylinder_right)
@@ -646,50 +643,28 @@ func _update_cylinder_params():
 		comp_cylinder_right.global_rotation = screen_mesh.global_rotation
 
 func _make_screen_transparent():
-	_screen_mesh_saved_mat = screen_mesh.material_override
-	var mat = StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0, 0, 0, 0)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	screen_mesh.material_override = mat
+	screen_mesh.visible = false
 
 func _make_ui_transparent():
-	_ui_saved_mat = ui_panel_3d.material_override
-	var mat = StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0, 0, 0, 0)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ui_panel_3d.material_override = mat
+	ui_panel_3d.visible = false
 
 func _make_kb_transparent():
 	if not virtual_keyboard:
 		return
-	_kb_saved_mat = virtual_keyboard.mesh_instance.material_override
-	var mat = StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0, 0, 0, 0)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	virtual_keyboard.mesh_instance.material_override = mat
+	virtual_keyboard.mesh_instance.visible = false
 
 func _restore_screen_material():
-	if _screen_mesh_saved_mat:
-		screen_mesh.material_override = _screen_mesh_saved_mat
-		_screen_mesh_saved_mat = null
-	elif _screen_mesh_original_mat:
-		screen_mesh.material_override = _screen_mesh_original_mat
+	screen_mesh.visible = true
 	var screen_bar = get_node_or_null("%ScreenGrabBar")
 	if screen_bar:
 		screen_bar.visible = true
 
 func _restore_ui_material():
-	if _ui_saved_mat:
-		ui_panel_3d.material_override = _ui_saved_mat
-		_ui_saved_mat = null
+	ui_panel_3d.visible = ui_visible
 
 func _restore_kb_material():
-	if _kb_saved_mat and virtual_keyboard:
-		virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
-		_kb_saved_mat = null
+	if virtual_keyboard:
+		virtual_keyboard.mesh_instance.visible = virtual_keyboard.visible
 
 func _get_steady_hit(raw: Vector3) -> Vector3:
 	if pointer_steady == 0 or not is_xr_active:
@@ -878,14 +853,13 @@ func _update_cursor_layer():
 		comp_kb.global_position = virtual_keyboard.global_position
 		comp_kb.global_rotation = virtual_keyboard.global_rotation
 		comp_kb.visible = true
-		if not _kb_saved_mat:
+		if virtual_keyboard.mesh_instance.visible:
 			_make_kb_transparent()
 	else:
 		if comp_kb:
 			comp_kb.visible = false
-		if virtual_keyboard and _kb_saved_mat:
-			virtual_keyboard.mesh_instance.material_override = _kb_saved_mat
-			_kb_saved_mat = null
+		if virtual_keyboard and not virtual_keyboard.mesh_instance.visible:
+			_restore_kb_material()
 
 func set_comp_grab_bar_color(viewport: SubViewport, color: Color):
 	if not viewport:
