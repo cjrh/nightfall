@@ -25,7 +25,7 @@ passthrough, and AI depth estimation, all built native on Godot 4.7 and OpenXR.
 - **HEVC hardware decoding** - NDK MediaCodec pipeline for low-latency H.265 on Quest 3/3S; VAAPI HEVC decode on Linux
 - **AI Stereoscopic 3D** - real-time AI depth conversion via MiDaS turns any 2D game into stereoscopic 3D, no server-side setup required (Quest only)
 - **SBS support** - Stretch and Crop modes for native side-by-side 3D content; quick-toggle via right thumbstick click
-- **Controller mapping** - PAD mode maps Quest controllers to a virtual gamepad; KBM mode keeps the pointer for mouse aim while binding movement to WASD and actions to keyboard keys
+- **Controller mapping** - PAD mode maps Quest controllers to an Xbox controller; KBM mode keeps the pointer for mouse aim while binding movement to WASD and actions to keyboard keys
 - **Virtual keyboard with trackpad** - floating keyboard for text input, plus an integrated trackpad for relative mouse control with trigger/grip for left/right click
 - **Head-angle-aware positioning** - screen, menu, and keyboard position relative to where you're looking; works standing, sitting, or lying down
 - **Shader smoothing & sharpening** - Gaussian blur plus CAS adaptive sharpening on the stream
@@ -34,7 +34,9 @@ passthrough, and AI depth estimation, all built native on Godot 4.7 and OpenXR.
 - **Passthrough** - see your real room with the stream floating in front of you
 - **Curved screen** - toggle curvature from the menu; flat, slight curve, or full wrap with optional bezel
 - **Quest Touch Plus models** - real controller models instead of placeholder boxes (Quest only)
+- **Hand tracking** - navigate and interact without controllers using Quest hand tracking (Quest only)
 - **Linux PCVR** - AppImage release for WiVRn/Monado with passthrough, composition layers, and SBS support
+- **X11 local capture** - low-latency screen capture for streaming the Linux desktop to itself without a network
 - **Compatibility** - works with any GameStream-compatible server
 - **Ease of use** - pair and connect in seconds; AI 3D requires no additional server-side configuration
 
@@ -52,15 +54,8 @@ Beyond gaming there is potential for Nightfall to become a useful streaming clie
 
 ### Roadmap
 
-- **Stream quality improvements** - higher fidelity at lower bandwidth through optimized encoding and rendering pipelines
-- **Stream performance improvements** - reduce latency and overhead throughout the capture, encode, decode, and display chain
 - **Wide mode for SBS** - when dynamic virtual desktop creation is supported, create a double-width desktop so SBS content renders at full per-eye resolution
 - **SBS auto-detection** - automatically detect side-by-side content and switch modes, then restore previous setting when SBS ends
-- **SBS mouse tracking** - resolve pointer positioning in SBS mode; evaluate ReShade filter integration or build a native solution
-- **Hand-tracked input devices** - use Quest hand tracking to track physical keyboard and mouse position; upload controller/keyboard/mouse 3D models for visual representation
-- **Custom controller profiles** - per-game keyboard and controller remapping UI for both PAD and KBM modes
-- **Additional environments** - new background scenes beyond the default
-- **SBS game menu** - an in-VR game launcher for SBS content, paired with a companion PC app for managing game shortcuts
 - **Server processing layer** - a companion app running on the Sunshine server that offloads processing from the headset, similar to WiVRn's architecture; potential for significant quality and performance gains
 
 ## Usage and Requirements
@@ -114,7 +109,7 @@ Setup:
 
 Toggle the controller mapper with **both thumbstick clicks** or the **Ctrl** button in the menu. Cycle between PAD and KBM with the **Type** button.
 
-**PAD mode** - Quest controllers become a virtual gamepad:
+**PAD mode** - Quest controllers emulate an Xbox controller:
 | Input | Action |
 |---|---|
 | **Thumbsticks** | Left/right stick |
