@@ -7,7 +7,7 @@
 #include <android/native_window.h>
 #include <atomic>
 #include <mutex>
-#include <queue>
+#include <vector>
 #include <cstdint>
 
 namespace godot {
@@ -37,15 +37,26 @@ public:
     // Release a frame after Vulkan import. Call AImage_delete internally.
     void release_frame(NativeDecodedFrame &frame);
 
+    // Stable IDs are available on Android API 31+ and enable import caching.
+    bool is_import_cache_enabled() const { return buffer_cache_supported_.load(); }
+    bool get_buffer_id(AHardwareBuffer *buffer, uint64_t &out_id) const;
+    void take_removed_buffer_ids(std::vector<uint64_t> &out_ids);
+
     bool is_initialized() const { return codec_ != nullptr; }
 
 private:
+    static void _on_buffer_removed(void *context, AImageReader *reader,
+                                   AHardwareBuffer *buffer);
+
     AMediaCodec *codec_ = nullptr;
     AImageReader *reader_ = nullptr;
     ANativeWindow *window_ = nullptr;
     int width_ = 0, height_ = 0;
     std::atomic<bool> started_{false};
     std::atomic<bool> eos_{false};
+    std::atomic<bool> buffer_cache_supported_{false};
+    std::mutex removed_buffers_mutex_;
+    std::vector<uint64_t> removed_buffer_ids_;
     int64_t input_pts_counter_ = 0;
 };
 
