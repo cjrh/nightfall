@@ -6,9 +6,12 @@
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <functional>
 #include <mutex>
 #include <vector>
-#include <cstdint>
 
 namespace godot {
 
@@ -17,24 +20,37 @@ struct NativeDecodedFrame {
     int64_t pts = 0;
     int width = 0;
     int height = 0;
-    AImage *image = nullptr; // Must keep alive until Vulkan import completes
+    AImage *image = nullptr; // Owns the ImageReader slot until release_frame().
 };
 
+// Owns the asynchronous MediaCodec/ImageReader protocol. NDK callbacks only
+// publish events; the decode thread remains the sole consumer of frames.
 class AndroidMediaCodec {
 public:
+    using EventNotifier = std::function<void()>;
+
+    enum class FeedResult {
+        QUEUED,
+        BACKPRESSURE,
+        ERROR,
+    };
+
     AndroidMediaCodec();
     ~AndroidMediaCodec();
 
-    bool init(const char *mime, int width, int height);
+    bool init(const char *mime, int width, int height,
+              EventNotifier event_notifier = {});
     void shutdown();
 
-    // Feed raw HEVC/H.264 data (call from decode thread)
-    bool feed_packet(const uint8_t *data, size_t size, int64_t pts);
+    // Queues one compressed packet when an asynchronously supplied input index
+    // is ready, distinguishing retryable backpressure from terminal failure.
+    FeedResult feed_packet(const uint8_t *data, size_t size, int64_t pts);
 
-    // Try to get a decoded frame. Returns true if frame available.
+    // Pops one callback-produced frame. This is a single-consumer interface;
+    // timeout_us may be zero for a non-blocking drain.
     bool dequeue_frame(NativeDecodedFrame &out_frame, int64_t timeout_us = 5000);
 
-    // Release a frame after Vulkan import. Call AImage_delete internally.
+    // Releases both the acquired ImageReader slot and the explicit AHB ref.
     void release_frame(NativeDecodedFrame &frame);
 
     // Stable IDs are available on Android API 31+ and enable import caching.
@@ -43,21 +59,61 @@ public:
     void take_removed_buffer_ids(std::vector<uint64_t> &out_ids);
 
     bool is_initialized() const { return codec_ != nullptr; }
+    bool has_error() const { return async_error_.load() != AMEDIA_OK; }
 
 private:
+    struct OutputEvent {
+        size_t index = 0;
+        AMediaCodecBufferInfo info{};
+        int width = 0;
+        int height = 0;
+        bool rendered = false;
+    };
+
+    static void _on_async_input_available(AMediaCodec *codec, void *userdata,
+                                          int32_t index);
+    static void _on_async_output_available(AMediaCodec *codec, void *userdata,
+                                           int32_t index,
+                                           AMediaCodecBufferInfo *info);
+    static void _on_async_format_changed(AMediaCodec *codec, void *userdata,
+                                         AMediaFormat *format);
+    static void _on_async_error(AMediaCodec *codec, void *userdata,
+                                media_status_t error, int32_t action_code,
+                                const char *detail);
+    static void _on_image_available(void *context, AImageReader *reader);
     static void _on_buffer_removed(void *context, AImageReader *reader,
                                    AHardwareBuffer *buffer);
+
+    void _notify_event();
+    void _release_frame_resources(NativeDecodedFrame &frame);
+    void _reset_event_state();
 
     AMediaCodec *codec_ = nullptr;
     AImageReader *reader_ = nullptr;
     ANativeWindow *window_ = nullptr;
-    int width_ = 0, height_ = 0;
+    std::atomic<int> width_{0};
+    std::atomic<int> height_{0};
     std::atomic<bool> started_{false};
     std::atomic<bool> eos_{false};
     std::atomic<bool> buffer_cache_supported_{false};
+
+    // Serializes callback bodies, including the lightweight wakeup notifier,
+    // with listener teardown so shutdown cannot return during a callback.
+    std::mutex callback_mutex_;
+
+    std::mutex event_mutex_;
+    std::condition_variable event_cv_;
+    std::deque<size_t> available_input_indices_;
+    std::deque<OutputEvent> available_output_events_;
+    OutputEvent pending_output_{};
+    bool pending_output_valid_ = false;
+    uint64_t image_event_generation_ = 0;
+    bool stopping_ = true;
+    std::atomic<media_status_t> async_error_{AMEDIA_OK};
+    EventNotifier event_notifier_;
+
     std::mutex removed_buffers_mutex_;
     std::vector<uint64_t> removed_buffer_ids_;
-    int64_t input_pts_counter_ = 0;
 };
 
 } // namespace godot

@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <vector>
 #include <chrono>
+#include <memory>
 
 extern "C" {
 #include <Limelight.h>
@@ -153,7 +154,13 @@ private:
         uint64_t owned_buffer_ptr = 0;
     };
 
-    std::atomic<AndroidMediaCodec *> native_codec_{nullptr};
+    std::shared_ptr<AndroidMediaCodec> _get_native_codec() const;
+    void _replace_native_codec(std::shared_ptr<AndroidMediaCodec> replacement);
+
+    mutable std::mutex native_codec_mutex_;
+    std::shared_ptr<AndroidMediaCodec> native_codec_;
+    std::atomic<bool> native_codec_event_{false};
+
     // Compute pipeline for YCbCr → RGBA conversion
     RID compute_shader_;
     RID compute_pipeline_;

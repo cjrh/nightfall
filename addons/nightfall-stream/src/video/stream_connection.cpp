@@ -35,6 +35,7 @@ AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_inde
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 extern "C" {
 #include <libavutil/pixdesc.h>
@@ -90,12 +91,9 @@ StreamConnection::~StreamConnection() {
         if (dummy_sampler_.is_valid()) rd->free_rid(dummy_sampler_);
         if (rgba_output_tex_.is_valid()) rd->free_rid(rgba_output_tex_);
     }
-    // Safe to shutdown now — decode thread is joined by stop()
-    auto *old_codec = native_codec_.exchange(nullptr);
-    if (old_codec) {
-        old_codec->shutdown();
-        delete old_codec;
-    }
+    // Safe to retire now — decode thread is joined by stop(). The codec shuts
+    // down when the last decode-thread reference is released.
+    _replace_native_codec(nullptr);
 #endif
     if (h264_extradata_) {
         av_freep(&h264_extradata_);
@@ -104,6 +102,22 @@ StreamConnection::~StreamConnection() {
 }
 
 #ifdef __ANDROID__
+std::shared_ptr<AndroidMediaCodec> StreamConnection::_get_native_codec() const {
+    std::lock_guard<std::mutex> lock(native_codec_mutex_);
+    return native_codec_;
+}
+
+void StreamConnection::_replace_native_codec(
+        std::shared_ptr<AndroidMediaCodec> replacement) {
+    std::shared_ptr<AndroidMediaCodec> retired;
+    {
+        std::lock_guard<std::mutex> lock(native_codec_mutex_);
+        retired = std::exchange(native_codec_, std::move(replacement));
+    }
+    // Destruction occurs outside the publication lock. If the decode thread
+    // still owns the old codec, its shutdown is naturally deferred.
+}
+
 void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, int height,
                                                 uint64_t generation) {
     std::lock_guard<std::mutex> state_lock(render_state_mutex_);
@@ -621,17 +635,11 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     // Android: ONLY native NDK MediaCodec + ImageReader for zero-copy GPU decode.
     // No FFmpeg fallback. Must fail loudly if unavailable.
 
-    // Prevent new decode work from entering this render generation. The old
-    // codec is intentionally not destroyed here because a decode call may still
-    // hold the raw pointer (pre-existing lifecycle behavior).
+    // Prevent new decode work from entering this render generation. A decode
+    // iteration keeps a shared reference, so replacement cannot destroy a codec
+    // while feed/dequeue operations are still using it.
     self->decoder_ready_.store(false);
-    auto *old_codec = self->native_codec_.exchange(nullptr);
-    if (old_codec) {
-        // Can't safely shutdown or delete here — decode thread may be using it.
-        // Store in a to-be-cleaned-up list or just leak until full stop.
-        // The decode thread loads the atomic pointer fresh each iteration,
-        // so it will switch to the new codec on the next loop.
-    }
+    self->_replace_native_codec(nullptr);
 
     // Start a new render generation before retiring cached imports. The state
     // lock serializes invalidation with pipeline creation and command recording.
@@ -667,10 +675,20 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
         mime = "video/avc";
     }
     if (mime) {
-        auto *new_codec = new AndroidMediaCodec();
-        if (new_codec->init(mime, width, height)) {
+        auto new_codec = std::make_shared<AndroidMediaCodec>();
+        auto notify_decode_thread = [self] {
+            {
+                // Condition-variable predicate mutations use the same mutex as
+                // the waiter so a callback cannot notify between its predicate
+                // check and sleep transition.
+                std::lock_guard<std::mutex> lock(self->queue_mutex_);
+                self->native_codec_event_.store(true);
+            }
+            self->queue_cv_.notify_one();
+        };
+        if (new_codec->init(mime, width, height, notify_decode_thread)) {
             NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d mime=%s", width, height, mime);
-            self->native_codec_.store(new_codec);
+            self->_replace_native_codec(new_codec);
             self->native_video_width_ = width;
             self->native_video_height_ = height;
             // Only ensure shader material exists (no texture setup — compute pipeline handles it)
@@ -680,7 +698,6 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
             return 0;
         }
         NF_LOGE("StreamConnection", "FATAL: Native MediaCodec init failed for %s", mime);
-        delete new_codec;
         return -1;
     }
     NF_LOGE("StreamConnection", "FATAL: Unsupported video format 0x%x on Android", videoFormat);
@@ -736,7 +753,7 @@ void StreamConnection::_cb_decoder_cleanup() {
     // Invalidate render state before uploader cleanup so no queued dispatch can
     // pass its generation guard and then touch an uploader being torn down.
     self->decoder_ready_.store(false);
-    self->native_codec_.exchange(nullptr);
+    self->_replace_native_codec(nullptr);
 
     RenderingServer *rs = RenderingServer::get_singleton();
     RenderingDevice *rd = rs ? rs->get_rendering_device() : nullptr;
@@ -1060,6 +1077,9 @@ void StreamConnection::_connection_thread_func() {
 
 void StreamConnection::_decode_thread_func() {
     AVPacket *pkt = nullptr;
+#ifdef __ANDROID__
+    bool native_input_blocked = false;
+#endif
 
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
@@ -1070,25 +1090,42 @@ void StreamConnection::_decode_thread_func() {
     }
 
     while (true) {
+        pkt = nullptr;
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] {
+            queue_cv_.wait(lock, [this
+#ifdef __ANDROID__
+                                  , &native_input_blocked
+#endif
+            ] {
+#ifdef __ANDROID__
+                return (!packet_queue_.empty() && !native_input_blocked) ||
+                       native_codec_event_.load() || !is_streaming_.load();
+#else
                 return !packet_queue_.empty() || !is_streaming_.load();
+#endif
             });
 
-            if (!is_streaming_.load() && packet_queue_.empty()) break;
+            if (!is_streaming_.load()) break;
 
-            if (packet_queue_.empty()) continue;
-
-            pkt = packet_queue_.front();
-            packet_queue_.erase(packet_queue_.begin());
+#ifdef __ANDROID__
+            if (native_codec_event_.exchange(false)) {
+                native_input_blocked = false;
+            }
+#endif
+            if (!packet_queue_.empty()
+#ifdef __ANDROID__
+                && !native_input_blocked
+#endif
+            ) {
+                pkt = packet_queue_.front();
+                packet_queue_.erase(packet_queue_.begin());
+            }
         }
-
-        if (!pkt) continue;
 
 #ifdef __ANDROID__
         uint64_t decode_generation = render_generation_.load();
-        AndroidMediaCodec *codec = native_codec_.load();
+        std::shared_ptr<AndroidMediaCodec> codec = _get_native_codec();
         if (codec && decoder_ready_.load()) {
             std::vector<uint64_t> removed_buffer_ids;
             codec->take_removed_buffer_ids(removed_buffer_ids);
@@ -1099,14 +1136,44 @@ void StreamConnection::_decode_thread_func() {
                 }
             }
 
-            // Native MediaCodec path: feed raw packet data, get AHB frames
-            int send_ret = codec->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
-            av_packet_free(&pkt);
-            if (!send_ret) continue;
+            // Feed input when present, but drain callback-produced output even
+            // when input backpressure temporarily leaves no buffer available.
+            if (pkt) {
+                AndroidMediaCodec::FeedResult feed_result;
+                bool stale_codec = false;
+                {
+                    // Keep publication stable across the non-blocking queue
+                    // operation so a packet cannot enter a retired generation.
+                    std::lock_guard<std::mutex> codec_lock(native_codec_mutex_);
+                    stale_codec = native_codec_ != codec || !decoder_ready_.load() ||
+                                  decode_generation != render_generation_.load();
+                    feed_result = stale_codec
+                        ? AndroidMediaCodec::FeedResult::BACKPRESSURE
+                        : codec->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
+                }
 
-            // Try to dequeue frames
+                if (feed_result == AndroidMediaCodec::FeedResult::QUEUED) {
+                    native_input_blocked = false;
+                    av_packet_free(&pkt);
+                } else if (feed_result == AndroidMediaCodec::FeedResult::BACKPRESSURE) {
+                    native_input_blocked = !stale_codec;
+                    std::lock_guard<std::mutex> lock(queue_mutex_);
+                    packet_queue_.insert(packet_queue_.begin(), pkt);
+                    pkt = nullptr;
+                } else {
+                    NF_LOGE("StreamConnection", "Native MediaCodec input failed; terminating stream");
+                    decoder_ready_.store(false);
+                    is_streaming_.store(false);
+                    av_packet_free(&pkt);
+                    queue_cv_.notify_all();
+                    LiInterruptConnection();
+                }
+            }
+
+            // Output indices and image availability arrive via callbacks. A
+            // zero timeout drains all work already ready without stalling input.
             NativeDecodedFrame frame;
-            while (codec->dequeue_frame(frame, 1000)) {
+            while (codec->dequeue_frame(frame, 0)) {
                 RenderingDevice *rd = RenderingServer::get_singleton()
                     ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
 
@@ -1236,9 +1303,18 @@ void StreamConnection::_decode_thread_func() {
 
                 codec->release_frame(frame);
             }
+            if (codec->has_error()) {
+                NF_LOGE("StreamConnection", "Native MediaCodec reported an asynchronous error; terminating stream");
+                decoder_ready_.store(false);
+                is_streaming_.store(false);
+                queue_cv_.notify_all();
+                LiInterruptConnection();
+            }
             continue; // Skip FFmpeg path
         }
 #endif
+
+        if (!pkt) continue;
 
         if (decoder_->is_raw_decode()) {
             if (pkt->size >= (int)sizeof(RawFrameHeader)) {
@@ -1486,6 +1562,11 @@ void StreamConnection::start(const String &host, const Dictionary &server_info, 
         decode_thread_.join();
     }
 
+#ifdef __ANDROID__
+    _replace_native_codec(nullptr);
+    native_codec_event_.store(false);
+#endif
+
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
         _clear_packet_queue();
@@ -1572,6 +1653,12 @@ void StreamConnection::stop() {
     if (decode_thread_.joinable()) {
         decode_thread_.join();
     }
+
+#ifdef __ANDROID__
+    // No callback may retain the StreamConnection wakeup after stop returns.
+    _replace_native_codec(nullptr);
+    native_codec_event_.store(false);
+#endif
 
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -1696,7 +1783,7 @@ int StreamConnection::get_video_height() const {
 
 bool StreamConnection::is_hw_decode() const {
 #ifdef __ANDROID__
-    if (native_codec_) return true; // Native MediaCodec is always HW
+    if (_get_native_codec()) return true; // Native MediaCodec is always HW
 #endif
     if (decoder_.is_valid()) return decoder_->is_hw_decode();
     return false;
