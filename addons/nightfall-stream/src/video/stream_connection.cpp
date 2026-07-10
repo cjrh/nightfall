@@ -5,6 +5,29 @@
 #include "input/input_bridge.h"
 #include "video/depth_bridge.h"
 #include "video/codec_defs.h"
+#include "ycbcr_to_rgba_spirv.h"
+#include <godot_cpp/classes/rendering_device.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/rd_shader_spirv.hpp>
+#include <godot_cpp/classes/rd_sampler_state.hpp>
+#include <godot_cpp/classes/rd_uniform.hpp>
+#include <godot_cpp/classes/rd_texture_format.hpp>
+#include <godot_cpp/classes/rd_texture_view.hpp>
+#ifdef __ANDROID__
+#include "video/mediacodec_internal.h"
+#include "video/mediacodec_native.h"
+#include <jni.h>
+#include <android/hardware_buffer.h>
+#include <media/NdkImageReader.h>
+#include <media/NdkImage.h>
+AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
+#endif
+#ifdef __ANDROID__
+#include "video/mediacodec_internal.h"
+#include <jni.h>
+#include <android/hardware_buffer.h>
+AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
+#endif
 
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -36,15 +59,241 @@ StreamConnection::StreamConnection() {
     audio_renderer_.instantiate();
     input_bridge_.instantiate();
     depth_bridge_.instantiate();
+#ifdef __ANDROID__
+    compute_pipeline_ready_.store(false);
+    display_wired_ = false;
+    native_video_width_ = 0;
+    native_video_height_ = 0;
+    native_color_range_ = 0;
+    native_color_matrix_type_ = 0;
+    pending_ahb_ptr_ = 0;
+    pending_width_ = 0;
+    pending_height_ = 0;
+    pending_color_range_ = 0;
+    pending_color_matrix_type_ = 0;
+#endif
 }
 
 StreamConnection::~StreamConnection() {
     stop();
+#ifdef __ANDROID__
+    RenderingDevice *rd = RenderingServer::get_singleton()
+        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    if (rd) {
+        if (compute_pipeline_.is_valid()) rd->free_rid(compute_pipeline_);
+        if (compute_shader_.is_valid()) rd->free_rid(compute_shader_);
+        if (dummy_sampler_.is_valid()) rd->free_rid(dummy_sampler_);
+        if (rgba_output_tex_.is_valid()) rd->free_rid(rgba_output_tex_);
+    }
+    // Safe to shutdown now — decode thread is joined by stop()
+    auto *old_codec = native_codec_.exchange(nullptr);
+    if (old_codec) {
+        old_codec->shutdown();
+        delete old_codec;
+    }
+#endif
     if (h264_extradata_) {
         av_freep(&h264_extradata_);
         h264_extradata_size_ = 0;
     }
 }
+
+#ifdef __ANDROID__
+void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, int height) {
+    static int ep_log = 0;
+    if (++ep_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "_ensure_compute_pipeline: ready=%d rd=%p w=%d h=%d",
+        (int)compute_pipeline_ready_, (void*)rd, width, height);
+    if (compute_pipeline_ready_) return;
+    if (!rd) return;
+
+    // Create RGBA8 output texture
+    Ref<RDTextureFormat> tf;
+    tf.instantiate();
+    tf->set_width(width);
+    tf->set_height(height);
+    tf->set_depth(1);
+    tf->set_array_layers(1);
+    tf->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+    tf->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
+    tf->set_usage_bits(RenderingDevice::TEXTURE_USAGE_STORAGE_BIT |
+                       RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
+                       RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT);
+
+    Ref<RDTextureView> tv;
+    tv.instantiate();
+
+    rgba_output_tex_ = rd->texture_create(tf, tv);
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RGBA output tex: %s", rgba_output_tex_.is_valid() ? "OK" : "FAIL");
+
+    // Create dummy sampler (placeholder, engine patch will override with YCbCr sampler)
+    Ref<RDSamplerState> sampler_state;
+    sampler_state.instantiate();
+    sampler_state->set_mag_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
+    sampler_state->set_min_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
+    sampler_state->set_repeat_u(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
+    sampler_state->set_repeat_v(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
+    dummy_sampler_ = rd->sampler_create(sampler_state);
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Dummy sampler: %s", dummy_sampler_.is_valid() ? "OK" : "FAIL");
+
+    // Create compute shader from SPIRV
+    PackedByteArray spirv;
+    spirv.resize(YCBCR_TO_RGBA_SPIRV_LEN);
+    memcpy(spirv.ptrw(), YCBCR_TO_RGBA_SPIRV, YCBCR_TO_RGBA_SPIRV_LEN);
+
+    Ref<RDShaderSPIRV> spirv_data;
+    spirv_data.instantiate();
+    spirv_data->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, spirv);
+
+    compute_shader_ = rd->shader_create_from_spirv(spirv_data);
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute shader: %s", compute_shader_.is_valid() ? "OK" : "FAIL");
+
+    if (!compute_shader_.is_valid()) return;
+
+    compute_pipeline_ = rd->compute_pipeline_create(compute_shader_);
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute pipeline: %s", compute_pipeline_.is_valid() ? "OK" : "FAIL");
+
+    if (!compute_pipeline_.is_valid()) return;
+
+    // Wire up canvas display — deferred to render thread (rs->texture_rd_create needs render thread)
+    uploader_->ensure_shader_material();
+
+    compute_pipeline_ready_ = true;
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute pipeline ready! %dx%d", width, height);
+}
+
+void StreamConnection::_render_compute_dispatch(RID ycbcr_tex_rid, RID ycbcr_sampler_rid, uint64_t ahb_ptr, int width, int height) {
+    // Used for direct call from render thread (non-queued path, kept for reference)
+}
+
+void StreamConnection::_render_compute_dispatch_rt() {
+    static int rt_enter = 0;
+    if (++rt_enter == 1) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT_ENTER");
+    // Read pending dispatch data
+    RID ycbcr_tex_rid, ycbcr_sampler_rid;
+    uint64_t ahb_ptr;
+    int width, height;
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        ycbcr_tex_rid = pending_ycbcr_tex_rid_;
+        ycbcr_sampler_rid = pending_ycbcr_sampler_rid_;
+        ahb_ptr = pending_ahb_ptr_;
+        width = pending_width_;
+        height = pending_height_;
+        pending_ahb_ptr_ = 0;
+    }
+
+    if (ahb_ptr == 0) return;
+
+    RenderingDevice *rd = RenderingServer::get_singleton()
+        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    if (!rd || !compute_pipeline_ready_) {
+        if (ycbcr_sampler_rid.is_valid() && rd) rd->free_rid(ycbcr_sampler_rid);
+        if (ycbcr_tex_rid.is_valid() && rd) rd->free_rid(ycbcr_tex_rid);
+        AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
+        return;
+    }
+
+    // Dispatch compute shader FIRST (so rgba_output_tex_ has valid data before display)
+    {
+        // Build uniform set
+        Ref<RDUniform> u_sampler;
+        u_sampler.instantiate();
+        u_sampler->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
+        u_sampler->set_binding(0);
+        u_sampler->add_id(ycbcr_sampler_rid);
+        u_sampler->add_id(ycbcr_tex_rid);
+
+        Ref<RDUniform> u_output;
+        u_output.instantiate();
+        u_output->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
+        u_output->set_binding(1);
+        u_output->add_id(rgba_output_tex_);
+
+        TypedArray<RDUniform> uniforms;
+        uniforms.append(u_sampler);
+        uniforms.append(u_output);
+
+        RID uniform_set = rd->uniform_set_create(uniforms, compute_shader_, 0);
+        if (!uniform_set.is_valid()) {
+            rd->free_rid(ycbcr_sampler_rid);
+            rd->free_rid(ycbcr_tex_rid);
+            AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
+            return;
+        }
+
+        int64_t cmd = rd->compute_list_begin();
+        rd->compute_list_bind_compute_pipeline(cmd, compute_pipeline_);
+        rd->compute_list_bind_uniform_set(cmd, uniform_set, 0);
+
+        uint32_t pc_data[4];
+        pc_data[0] = (uint32_t)width;
+        pc_data[1] = (uint32_t)height;
+
+        uint32_t color_range = 0;
+        if (stream_config_.colorRange == COLOR_RANGE_FULL) {
+            color_range = 1;
+        }
+        uint32_t color_matrix = 1;
+        if (stream_config_.colorSpace == COLORSPACE_REC_601) {
+            color_matrix = 0;
+        } else if (stream_config_.colorSpace == COLORSPACE_REC_2020) {
+            color_matrix = 2;
+        }
+        pc_data[2] = color_range;
+        pc_data[3] = color_matrix;
+
+        PackedByteArray push_constants;
+        push_constants.resize(16);
+        memcpy(push_constants.ptrw(), pc_data, 16);
+        rd->compute_list_set_push_constant(cmd, push_constants, 16);
+
+        rd->compute_list_dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
+        rd->compute_list_end();
+
+        rd->free_rid(uniform_set);
+    }
+
+    // One-time per session AFTER first compute dispatch: wire display to rgba_output_tex_
+    // (must be after dispatch so texture has valid video data, not uninitialized white)
+    if (!display_wired_ && rgba_output_tex_.is_valid()) {
+        display_wired_ = true;
+        RenderingServer *rs = RenderingServer::get_singleton();
+        if (rs) {
+            RID rs_tex = rs->texture_rd_create(rgba_output_tex_);
+            __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: rs_texture_rd_create valid=%d", (int)rs_tex.is_valid());
+            uploader_->ensure_shader_material();
+            Ref<ShaderMaterial> mat = uploader_->get_shader_material();
+            if (mat.is_valid() && rs_tex.is_valid()) {
+                mat->set_shader_parameter("tex_y", rs_tex);
+                mat->set_shader_parameter("color_matrix_type", 3);
+                mat->set_shader_parameter("color_range", 1);
+                mat->set_shader_parameter("is_nv12_rd", false);
+                mat->set_shader_parameter("is_semi_planar", false);
+                __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: tex_y set AFTER compute dispatch");
+            }
+        }
+    }
+
+    // Cleanup
+    rd->free_rid(ycbcr_sampler_rid);
+    rd->free_rid(ycbcr_tex_rid);
+
+    AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
+    static int rt_done = 0;
+    if (++rt_done <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: dispatch complete");
+}
+
+void StreamConnection::_render_free_pipeline_rt() {
+    RenderingDevice *rd = RenderingServer::get_singleton()
+        ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    if (!rd) return;
+
+    if (pending_free_pipeline_.is_valid()) { rd->free_rid(pending_free_pipeline_); pending_free_pipeline_ = RID(); }
+    if (pending_free_shader_.is_valid()) { rd->free_rid(pending_free_shader_); pending_free_shader_ = RID(); }
+    if (pending_free_sampler_.is_valid()) { rd->free_rid(pending_free_sampler_); pending_free_sampler_ = RID(); }
+    if (pending_free_tex_.is_valid()) { rd->free_rid(pending_free_tex_); pending_free_tex_ = RID(); }
+}
+#endif
 
 bool StreamConnection::_extract_h264_sps_pps(const uint8_t *data, int size,
                                                uint8_t **sps, int *sps_size,
@@ -169,13 +418,73 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
 
     if (self->local_capture_mode_) {
         NF_LOG("StreamConnection", "Local capture mode: skipping Sunshine decoder/uploader setup");
-        // ShaderMaterial was pre-created by ensure_shader_material() on the main thread.
-        // X11 capture will set up BGRA textures via setup_bgra() in _process().
-        // Mark decoder as ready so connection proceeds.
         self->decoder_ready_.store(true);
         return 0;
     }
 
+#ifdef __ANDROID__
+    // Android: ONLY native NDK MediaCodec + ImageReader for zero-copy GPU decode.
+    // No FFmpeg fallback. Must fail loudly if unavailable.
+
+    // Shut down any existing codec before reconfiguration
+    // IMPORTANT: don't call shutdown() here — the decode thread may still be
+    // inside a dequeue_frame() call. Just swap the pointer atomically.
+    // Old codecs will be cleaned up in _cb_decoder_cleanup via exchange+shutdown.
+    auto *old_codec = self->native_codec_.exchange(nullptr);
+    if (old_codec) {
+        // Can't safely shutdown or delete here — decode thread may be using it.
+        // Store in a to-be-cleaned-up list or just leak until full stop.
+        // The decode thread loads the atomic pointer fresh each iteration,
+        // so it will switch to the new codec on the next loop.
+    }
+
+    // Reset compute pipeline state for reconfiguration
+    // IMPORTANT: set compute_pipeline_ready_ = false FIRST so queued render-thread
+    // callbacks will bail out before using resources we're about to free.
+    self->compute_pipeline_ready_ = false;
+    self->display_wired_ = false;
+
+    // Free GPU resources on render thread to guarantee no pending callbacks use them
+    RenderingServer *rs = RenderingServer::get_singleton();
+    RenderingDevice *rd = rs ? rs->get_rendering_device() : nullptr;
+    if (rd) {
+        self->pending_free_pipeline_ = self->compute_pipeline_;
+        self->pending_free_shader_ = self->compute_shader_;
+        self->pending_free_sampler_ = self->dummy_sampler_;
+        self->pending_free_tex_ = self->rgba_output_tex_;
+        self->compute_pipeline_ = RID();
+        self->compute_shader_ = RID();
+        self->dummy_sampler_ = RID();
+        self->rgba_output_tex_ = RID();
+        rs->call_on_render_thread(callable_mp(self, &StreamConnection::_render_free_pipeline_rt));
+    }
+
+    const char *mime = nullptr;
+    if (videoFormat & VIDEO_FORMAT_MASK_H265) {
+        mime = "video/hevc";
+    } else if (videoFormat & VIDEO_FORMAT_MASK_H264) {
+        mime = "video/avc";
+    }
+    if (mime) {
+        auto *new_codec = new AndroidMediaCodec();
+        if (new_codec->init(mime, width, height)) {
+            NF_LOG("StreamConnection", "Native MediaCodec created: %dx%d mime=%s", width, height, mime);
+            self->native_codec_.store(new_codec);
+            self->native_video_width_ = width;
+            self->native_video_height_ = height;
+            // Only ensure shader material exists (no texture setup — compute pipeline handles it)
+            self->uploader_->ensure_shader_material();
+            self->uploader_->set_active(true); // NV12 mode
+            self->decoder_ready_.store(true);
+            return 0;
+        }
+        NF_LOGE("StreamConnection", "FATAL: Native MediaCodec init failed for %s", mime);
+        delete new_codec;
+        return -1;
+    }
+    NF_LOGE("StreamConnection", "FATAL: Unsupported video format 0x%x on Android", videoFormat);
+    return -1;
+#else
     int ret = self->decoder_->setup(videoFormat, width, height, false);
     if (ret != 0) {
         NF_LOGE("StreamConnection", "Decoder setup FAILED: ret=%d", ret);
@@ -202,6 +511,7 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
 
     self->decoder_ready_.store(true);
     return 0;
+#endif
 }
 
 void StreamConnection::_cb_decoder_start() {
@@ -224,6 +534,21 @@ void StreamConnection::_cb_decoder_cleanup() {
             self->decoder_->cleanup();
             self->uploader_->cleanup();
         }
+#ifdef __ANDROID__
+        // Just swap pointer — don't shutdown while decode thread may be active.
+        // Final cleanup happens in destructor after decode thread is joined.
+        self->native_codec_.exchange(nullptr);
+        // Free compute pipeline resources
+        RenderingDevice *rd = RenderingServer::get_singleton()
+            ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+        if (rd) {
+            if (self->compute_pipeline_.is_valid()) rd->free_rid(self->compute_pipeline_);
+            if (self->compute_shader_.is_valid()) rd->free_rid(self->compute_shader_);
+            if (self->dummy_sampler_.is_valid()) rd->free_rid(self->dummy_sampler_);
+            if (self->rgba_output_tex_.is_valid()) rd->free_rid(self->rgba_output_tex_);
+        }
+        self->compute_pipeline_ready_ = false;
+#endif
         self->decoder_ready_.store(false);
         self->h264_hw_upgrade_pending_.store(false);
         self->h264_hw_upgraded_.store(false);
@@ -541,6 +866,109 @@ void StreamConnection::_decode_thread_func() {
 
         if (!pkt) continue;
 
+#ifdef __ANDROID__
+        AndroidMediaCodec *codec = native_codec_.load();
+        if (codec && decoder_ready_.load()) {
+            // Native MediaCodec path: feed raw packet data, get AHB frames
+            int send_ret = codec->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
+            av_packet_free(&pkt);
+            if (!send_ret) continue;
+
+            // Try to dequeue frames
+            NativeDecodedFrame frame;
+            while (codec->dequeue_frame(frame, 1000)) {
+                RenderingDevice *rd = RenderingServer::get_singleton()
+                    ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+
+                if (!(rd && rd->has_method("texture_create_from_android_hardware_buffer") && frame.buffer)) {
+                    __android_log_print(ANDROID_LOG_ERROR, "STRDEBG", "SKIP: rd=%p has=%d buf=%p",
+                        (void*)rd, rd ? (int)rd->has_method("texture_create_from_android_hardware_buffer") : -1,
+                        (void*)frame.buffer);
+                    codec->release_frame(frame);
+                    continue;
+                }
+
+                // One-time compute pipeline setup
+                _ensure_compute_pipeline(rd, frame.width, frame.height);
+
+                if (!compute_pipeline_ready_) {
+                    codec->release_frame(frame);
+                    continue;
+                }
+
+                // Import AHB as YCbCr texture (engine patch handles Vulkan image creation + YCbCr conversion)
+                int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT);
+                static int tc_log = 0;
+                if (++tc_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "calling texture_create_from_android_hardware_buffer");
+                Variant tex_rid_var = rd->call("texture_create_from_android_hardware_buffer",
+                    (uint64_t)frame.buffer,
+                    (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
+                    frame.width, frame.height, usage);
+                RID ycbcr_tex_rid = tex_rid_var;
+                static int a_log = 0;
+                if (++a_log <= 1) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "AHB_OK");
+
+                if (!ycbcr_tex_rid.is_valid()) {
+                    codec->release_frame(frame);
+                    continue;
+                }
+
+                // Get YCbCr sampler for this texture
+                Variant sampler_var = rd->call("texture_get_ycbcr_sampler", ycbcr_tex_rid);
+                RID ycbcr_sampler_rid = sampler_var;
+                static int s_log = 0;
+                if (++s_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "YCbCr sampler valid=%d", (int)ycbcr_sampler_rid.is_valid());
+
+                if (!ycbcr_sampler_rid.is_valid()) {
+                    rd->free_rid(ycbcr_tex_rid);
+                    codec->release_frame(frame);
+                    continue;
+                }
+
+                // Acquire AHB reference for render thread
+                AHardwareBuffer_acquire(frame.buffer);
+                static int acq_log = 0;
+                if (++acq_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "AHB acquired, storing pending dispatch");
+
+                // Store pending dispatch data (RIDs don't cross threads well via call_on_render_thread.bind)
+                {
+                    std::lock_guard<std::mutex> lock(pending_mutex_);
+                    pending_ycbcr_tex_rid_ = ycbcr_tex_rid;
+                    pending_ycbcr_sampler_rid_ = ycbcr_sampler_rid;
+                    pending_ahb_ptr_ = (uint64_t)frame.buffer;
+                    pending_width_ = frame.width;
+                    pending_height_ = frame.height;
+                }
+
+                // Marshal compute dispatch to render thread
+                RenderingServer *rs = RenderingServer::get_singleton();
+                if (rs) {
+                    rs->call_on_render_thread(callable_mp(this, &StreamConnection::_render_compute_dispatch_rt));
+                    static int q_log = 0;
+                    if (++q_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "CALL queued rt=%d", q_log);
+                } else {
+                    AHardwareBuffer_release(frame.buffer);
+                    rd->free_rid(ycbcr_sampler_rid);
+                    rd->free_rid(ycbcr_tex_rid);
+                }
+
+                frames_decoded_.fetch_add(1);
+                static int log_count = 0;
+                if (++log_count <= 10)
+                    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Queued compute dispatch %dx%d frame=%d", frame.width, frame.height, log_count);
+
+                auto decode_done = std::chrono::steady_clock::now();
+                auto decode_done_us = std::chrono::duration_cast<std::chrono::microseconds>(decode_done.time_since_epoch()).count();
+                int64_t submit_us = last_submit_time_us_.load();
+                if (submit_us > 0 && decode_done_us > submit_us)
+                    last_frame_latency_us_.store((int)(decode_done_us - submit_us));
+
+                codec->release_frame(frame);
+            }
+            continue; // Skip FFmpeg path
+        }
+#endif
+
         if (decoder_->is_raw_decode()) {
             if (pkt->size >= (int)sizeof(RawFrameHeader)) {
                 RawFrameHeader hdr;
@@ -669,15 +1097,65 @@ void StreamConnection::_decode_thread_func() {
 
                 AVFrame *final_frame = tmp;
                 AVFrame *sw_frame = nullptr;
+                bool used_ahb = false;
                 if (tmp->hw_frames_ctx) {
-                    sw_frame = av_frame_alloc();
-                    int transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
-                    if (transfer_ret >= 0) {
-                        av_frame_copy_props(sw_frame, tmp);
-                        final_frame = sw_frame;
-                    } else {
-                        av_frame_free(&sw_frame);
-                        sw_frame = nullptr;
+                    // AHardwareBuffer GPU-only path (Android, custom Godot build).
+                    // No fallback — must succeed or frame is discarded.
+#ifdef __ANDROID__
+                    if (decoder_->get_codec_context()) {
+                        jobject codec_obj = (jobject)mediacodec_get_codec_object(
+                            decoder_->get_codec_context());
+                        ssize_t buf_idx = mediacodec_get_buffer_index(tmp);
+                        if (codec_obj && buf_idx >= 0) {
+                            AHardwareBuffer *ahb = mediacodec_get_ahb(codec_obj, buf_idx);
+                            if (ahb) {
+                                AHardwareBuffer_Desc desc;
+                                AHardwareBuffer_describe(ahb, &desc);
+                                int w = desc.width;
+                                int h = desc.height;
+
+                                RenderingDevice *rd = RenderingServer::get_singleton()
+                                    ? RenderingServer::get_singleton()->get_rendering_device()
+                                    : nullptr;
+
+                                if (rd && rd->has_method("texture_create_from_android_hardware_buffer")) {
+                                    int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT);
+                                    Variant tex_rid_var = rd->call("texture_create_from_android_hardware_buffer",
+                                        (uint64_t)ahb, (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM, w, h, usage);
+                                    RID tex_rid = tex_rid_var;
+                                    if (tex_rid.is_valid()) {
+                                        uploader_->ensure_shader_material();
+                                        uploader_->set_texture_from_native_rid(tex_rid, w, h);
+                                        used_ahb = true;
+                                    } else {
+                                        NF_LOGE("StreamConnection", "Tier1: texture_create_from_android_hardware_buffer returned invalid RID!");
+                                    }
+                                } else {
+                                    NF_LOGE("StreamConnection", "Tier1: Godot API texture_create_from_android_hardware_buffer not available. Custom engine build required.");
+                                }
+                                AHardwareBuffer_release(ahb);
+                            } else {
+                                NF_LOGE("StreamConnection", "Tier1: mediacodec_get_ahb returned null");
+                            }
+                        } else {
+                            NF_LOGE("StreamConnection", "Tier1: cannot get MediaCodec object or buffer index");
+                        }
+                    }
+#endif
+                    if (!used_ahb) {
+                        // Fallback: av_hwframe_map/transfer (legacy path)
+                        sw_frame = av_frame_alloc();
+                        int transfer_ret = av_hwframe_map(sw_frame, tmp, AV_HWFRAME_MAP_READ);
+                        if (transfer_ret < 0) {
+                            transfer_ret = av_hwframe_transfer_data(sw_frame, tmp, 0);
+                        }
+                        if (transfer_ret >= 0) {
+                            av_frame_copy_props(sw_frame, tmp);
+                            final_frame = sw_frame;
+                        } else {
+                            av_frame_free(&sw_frame);
+                            sw_frame = nullptr;
+                        }
                     }
                 }
 
@@ -698,7 +1176,9 @@ void StreamConnection::_decode_thread_func() {
                     uploader_->update_colorspace((int)frame_cs, (int)frame_cr);
                 }
 
-                uploader_->update_from_frame(final_frame);
+                if (!used_ahb) {
+                    uploader_->update_from_frame(final_frame);
+                }
 
                 if (sw_frame) {
                     av_frame_free(&sw_frame);
@@ -928,16 +1408,25 @@ String StreamConnection::get_decoder_name() const {
 }
 
 int StreamConnection::get_video_width() const {
-    if (decoder_.is_valid()) return decoder_->get_video_width();
+    if (decoder_.is_valid() && decoder_->get_video_width() > 0) return decoder_->get_video_width();
+#ifdef __ANDROID__
+    if (native_video_width_ > 0) return native_video_width_;
+#endif
     return 0;
 }
 
 int StreamConnection::get_video_height() const {
-    if (decoder_.is_valid()) return decoder_->get_video_height();
+    if (decoder_.is_valid() && decoder_->get_video_height() > 0) return decoder_->get_video_height();
+#ifdef __ANDROID__
+    if (native_video_height_ > 0) return native_video_height_;
+#endif
     return 0;
 }
 
 bool StreamConnection::is_hw_decode() const {
+#ifdef __ANDROID__
+    if (native_codec_) return true; // Native MediaCodec is always HW
+#endif
     if (decoder_.is_valid()) return decoder_->is_hw_decode();
     return false;
 }

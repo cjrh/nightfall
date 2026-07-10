@@ -84,6 +84,35 @@ ninja -C build/linux-release
 
 Either way, the output is `bin/linux/libnightfall-stream.linux.template_release.x86_64.so` (~29MB stripped). AI 3D / depth estimation is stubbed on Linux.
 
+### Patched Godot Engine (Quest only)
+
+The Quest's zero-copy GPU decode pipeline requires a custom Godot engine build with Vulkan Android Hardware Buffer (AHB) import support. The patch adds two RenderingDevice methods: `texture_create_from_android_hardware_buffer` and `texture_get_ycbcr_sampler`.
+
+**You must build BOTH debug and release templates** and place them in the export templates directory. Without the release template, the release APK will silently fall back to the unpatched engine and show a black screen.
+
+```bash
+# Clone Godot 4.7 and apply the patch
+git clone -b 4.7 https://github.com/godotengine/godot.git /tmp/godot
+cd /tmp/godot
+git apply /path/to/moonlight-quest/patches/godot-4.7-ahb.patch
+
+# Build debug template
+scons platform=android target=template_debug arch=arm64 -j$(nproc)
+cp bin/libgodot.android.template_debug.arm64.so \
+   ~/.local/share/godot/export_templates/4.7.stable/android_debug_arm64.so
+
+# Build release template
+scons platform=android target=template_release arch=arm64 -j$(nproc)
+cp platform/android/java/lib/libs/release/arm64-v8a/libgodot_android.so \
+   ~/.local/share/godot/export_templates/4.7.stable/android_release_arm64.so
+```
+
+> **Note**: The release template output is moved by scons to `platform/android/java/lib/libs/release/arm64-v8a/` — copy it from there, not from `bin/`.
+
+> **Note**: `build.sh` also copies the patched `.so` (from `addons/nightfall-stream/bin/android/libgodot_android.so`) into the extracted Gradle project during export as a safety net. Keep this file in sync with the template.
+
+The required Android SDK/NDK paths are auto-detected if `ANDROID_HOME` is configured in the Godot editor settings (stored in `~/.config/godot/editor_settings-4.7.tres`).
+
 ## 2. Export the APK
 
 The `build.sh` script handles everything:

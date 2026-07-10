@@ -18,6 +18,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "Android",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
         "ANDROID_ABI": "$env{ANDROID_ABI}",
         "ANDROID_PLATFORM": "android-28",

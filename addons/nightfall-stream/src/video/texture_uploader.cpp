@@ -8,10 +8,101 @@ using namespace godot;
 
 TextureUploader::TextureUploader() {
     texture_mutex.instantiate();
+    pending_native_width_ = 0;
+    pending_native_height_ = 0;
 }
 
 TextureUploader::~TextureUploader() {
     cleanup();
+}
+
+void TextureUploader::set_active(bool nv12) {
+    use_shader_conversion = true;
+    is_nv12 = nv12;
+}
+
+void TextureUploader::set_texture_from_native_rid(RID p_tex_rid, int p_width, int p_height) {
+    // Replaces the texture pipeline with a pre-existing GPU texture.
+    // Used for zero-copy AHardwareBuffer import where the texture
+    // is already on the GPU with YCbCr hardware conversion.
+    use_shader_conversion = true;
+    is_nv12 = false; // Single combined texture, not separate Y/UV planes
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    if (!rs) return;
+
+    // Store pending state to avoid .bind(RID) issues with call_on_render_thread
+    pending_native_rid_ = p_tex_rid;
+    pending_native_width_ = p_width;
+    pending_native_height_ = p_height;
+
+    // Queue render thread setup to replace textures
+    rs->call_on_render_thread(callable_mp(this, &TextureUploader::_render_thread_import_native_rt));
+}
+
+void TextureUploader::_render_thread_import_native(RID p_tex_rid, int p_width, int p_height) {
+    // Original version with bound args - kept for reference
+}
+
+void TextureUploader::_render_thread_import_native_rt() {
+    // Read pending state (avoids .bind(RID) issues with call_on_render_thread)
+    RID p_tex_rid = pending_native_rid_;
+    int p_width = pending_native_width_;
+    int p_height = pending_native_height_;
+    if (!p_tex_rid.is_valid()) return;
+
+    std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    rd = rs ? rs->get_rendering_device() : nullptr;
+
+    if (!rd) return;
+
+    // Free any existing textures
+    for (int i = 0; i < 3; i++) {
+        rd_texture_wrappers[i].unref();
+        if (rs_texture_rid[i].is_valid()) {
+            rs->free_rid(rs_texture_rid[i]);
+            rs_texture_rid[i] = RID();
+        }
+        if (rd_texture_rid[i].is_valid() && rd_texture_rid[i] != p_tex_rid) {
+            rd->free_rid(rd_texture_rid[i]);
+            rd_texture_rid[i] = RID();
+        }
+    }
+
+    // Use the imported texture directly
+    rd_texture_rid[0] = p_tex_rid;
+    rs_texture_rid[0] = rs->texture_rd_create(p_tex_rid);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "import_native_rt: rs_tex valid=%d",
+        (int)rs_texture_rid[0].is_valid());
+#endif
+
+    if (rd_texture_wrappers[0].is_null())
+        rd_texture_wrappers[0].instantiate();
+    rd_texture_wrappers[0]->set_texture_rd_rid(p_tex_rid);
+
+    ensure_shader_material();
+    if (shader_material.is_valid()) {
+        shader_material->set_shader_parameter("tex_y", rd_texture_wrappers[0]);
+        shader_material->set_shader_parameter("is_semi_planar", false);
+        shader_material->set_shader_parameter("is_nv12_rd", false);
+        shader_material->set_shader_parameter("color_matrix_type", 3);
+        shader_material->set_shader_parameter("color_range", 1);
+        shader_material->set_shader_parameter("swap_uv", false);
+    }
+
+    new_frame_available_.store(true);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "import_native_rt: complete");
+#endif
+
+    current_width = p_width;
+    current_height = p_height;
+
+    // Clear pending state
+    pending_native_rid_ = RID();
 }
 
 void TextureUploader::ensure_shader_material() {

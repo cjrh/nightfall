@@ -7,14 +7,18 @@
 #ifdef __ANDROID__
 #include <dlfcn.h>
 #include <jni.h>
+#include <android/hardware_buffer.h>
+#include <android/hardware_buffer_jni.h>
 extern "C" {
 #include <libavcodec/jni.h>
+#include <libavcodec/mediacodec.h>
 }
 
+static JavaVM *g_jvm = nullptr;
+
 extern "C" JNIEXPORT void JNICALL Java_com_godot_game_GodotApp_initializeMoonlightJNI(JNIEnv *env, jclass clazz) {
-    JavaVM *vm = nullptr;
-    if (env->GetJavaVM(&vm) == 0) {
-        av_jni_set_java_vm(vm, nullptr);
+    if (env->GetJavaVM(&g_jvm) == 0) {
+        av_jni_set_java_vm(g_jvm, nullptr);
     }
 }
 
@@ -25,6 +29,62 @@ extern "C" JNIEXPORT void JNICALL Java_com_godot_game_GodotApp_setAndroidContext
             av_jni_set_android_app_ctx(global_ref, nullptr);
         }
     }
+}
+
+// Extract AHardwareBuffer from a MediaCodec output frame.
+// Requires access to FFmpeg internal MediaCodecDecContext (mediacodec_internal.h).
+// Returns nullptr if the output buffer is not backed by an AHardwareBuffer
+// (e.g., it's a ByteBuffer or the codec wasn't configured with AHB output).
+AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index) {
+    if (!g_jvm || !media_codec_obj || buffer_index < 0) return nullptr;
+
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    jint res = g_jvm->GetEnv((void **)&env, JNI_VERSION_1_6);
+    if (res == JNI_EDETACHED) {
+        res = g_jvm->AttachCurrentThread(&env, nullptr);
+        if (res != JNI_OK) return nullptr;
+        attached = true;
+    } else if (res != JNI_OK) {
+        return nullptr;
+    }
+
+    AHardwareBuffer *ahb = nullptr;
+
+    jclass cls_mediacodec = env->GetObjectClass(media_codec_obj);
+    jmethodID mid_getOutputImage = env->GetMethodID(cls_mediacodec, "getOutputImage", "(I)Landroid/media/Image;");
+    if (mid_getOutputImage) {
+        jobject image = env->CallObjectMethod(media_codec_obj, mid_getOutputImage, (jint)buffer_index);
+        if (image && !env->ExceptionCheck()) {
+            jclass cls_image = env->GetObjectClass(image);
+            jmethodID mid_getHardwareBuffer = env->GetMethodID(cls_image, "getHardwareBuffer", "()Landroid/hardware/HardwareBuffer;");
+            if (mid_getHardwareBuffer) {
+                jobject hb = env->CallObjectMethod(image, mid_getHardwareBuffer);
+                if (hb && !env->ExceptionCheck()) {
+                    ahb = AHardwareBuffer_fromHardwareBuffer(env, hb);
+                    // Keep the Java HardwareBuffer ref alive. The AHardwareBuffer is
+                    // only valid while the Java object exists. We return the AHB and
+                    // keep the JNI reference; the caller must release it after the
+                    // Vulkan external memory import completes.
+                    // Don't close the Image either - that would release the buffer.
+                }
+                if (!ahb && hb) env->DeleteLocalRef(hb);
+            }
+            env->DeleteLocalRef(cls_image);
+            if (!ahb && image) {
+                env->CallVoidMethod(image, env->GetMethodID(cls_image, "close", "()V"));
+                env->DeleteLocalRef(image);
+            }
+        } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+    env->DeleteLocalRef(cls_mediacodec);
+
+    if (attached) {
+        g_jvm->DetachCurrentThread();
+    }
+    return ahb;
 }
 
 #endif

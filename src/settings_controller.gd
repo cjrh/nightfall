@@ -289,6 +289,6 @@ func _schedule_stream_restart():
 	main.stream_manager.start_stream(main.current_host_id, main._selected_app_id)
 
 func toggle_hand_tracking():
-	main.tracking_mode = (main.tracking_mode + 1) % 3
+	main.tracking_mode = (main.tracking_mode + 1) % 2
 	main.state_manager.save_state()
 	main.state_manager.sync_ui_to_settings()
