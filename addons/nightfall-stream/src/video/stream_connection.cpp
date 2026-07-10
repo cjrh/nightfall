@@ -33,6 +33,7 @@ AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_inde
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
+#include <algorithm>
 #include <cstring>
 
 extern "C" {
@@ -66,11 +67,13 @@ StreamConnection::StreamConnection() {
     native_video_height_ = 0;
     native_color_range_ = 0;
     native_color_matrix_type_ = 0;
-    pending_ahb_ptr_ = 0;
+    pending_buffer_id_ = 0;
+    pending_generation_ = 0;
+    pending_uncached_buffer_ptr_ = 0;
     pending_width_ = 0;
     pending_height_ = 0;
-    pending_color_range_ = 0;
-    pending_color_matrix_type_ = 0;
+    pending_dispatch_cached_ = false;
+    pending_dispatch_ready_ = false;
 #endif
 }
 
@@ -79,7 +82,9 @@ StreamConnection::~StreamConnection() {
 #ifdef __ANDROID__
     RenderingDevice *rd = RenderingServer::get_singleton()
         ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+    _retire_all_ahb_imports();
     if (rd) {
+        _render_free_pipeline_rt();
         if (compute_pipeline_.is_valid()) rd->free_rid(compute_pipeline_);
         if (compute_shader_.is_valid()) rd->free_rid(compute_shader_);
         if (dummy_sampler_.is_valid()) rd->free_rid(dummy_sampler_);
@@ -99,7 +104,11 @@ StreamConnection::~StreamConnection() {
 }
 
 #ifdef __ANDROID__
-void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, int height) {
+void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, int height,
+                                                uint64_t generation) {
+    std::lock_guard<std::mutex> state_lock(render_state_mutex_);
+    if (generation != render_generation_.load()) return;
+
     static int ep_log = 0;
     if (++ep_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "_ensure_compute_pipeline: ready=%d rd=%p w=%d h=%d",
         (int)compute_pipeline_ready_, (void*)rd, width, height);
@@ -161,47 +170,209 @@ void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, 
     __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute pipeline ready! %dx%d", width, height);
 }
 
-void StreamConnection::_render_compute_dispatch(RID ycbcr_tex_rid, RID ycbcr_sampler_rid, uint64_t ahb_ptr, int width, int height) {
-    // Used for direct call from render thread (non-queued path, kept for reference)
+bool StreamConnection::_get_or_create_ahb_import(RenderingDevice *rd,
+        uint64_t buffer_ptr, uint64_t buffer_id, int width, int height,
+        uint64_t generation) {
+    std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+    if (generation != render_generation_.load() || !compute_pipeline_ready_) return false;
+
+    auto existing = std::find_if(ahb_import_cache_.begin(), ahb_import_cache_.end(),
+        [buffer_id, generation](const CachedAhbImport &entry) {
+            return entry.buffer_id == buffer_id && entry.generation == generation;
+        });
+    if (existing != ahb_import_cache_.end()) {
+        ahb_cache_hits_++;
+        return true;
+    }
+
+    int usage = (int)RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT;
+    Variant texture_var = rd->call("texture_create_from_android_hardware_buffer",
+        buffer_ptr, (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
+        width, height, usage);
+    RID texture = texture_var;
+    if (!texture.is_valid()) return false;
+
+    Variant sampler_var = rd->call("texture_get_ycbcr_sampler", texture);
+    RID sampler = sampler_var;
+    if (!sampler.is_valid()) {
+        rd->free_rid(texture);
+        return false;
+    }
+
+    // Reconfiguration may have started while the driver import was executing.
+    if (generation != render_generation_.load() || !compute_pipeline_ready_) {
+        rd->free_rid(sampler);
+        rd->free_rid(texture);
+        return false;
+    }
+
+    CachedAhbImport entry;
+    entry.buffer_id = buffer_id;
+    entry.generation = generation;
+    entry.texture = texture;
+    entry.sampler = sampler;
+    // Keep the opaque handle and pointer fallback key valid until the imported
+    // Vulkan objects are retired, independent of the frame's AImage lifetime.
+    AHardwareBuffer_acquire((AHardwareBuffer *)buffer_ptr);
+    entry.owned_buffer_ptr = buffer_ptr;
+    ahb_import_cache_.push_back(entry);
+    ahb_cache_misses_++;
+
+    NF_LOG("StreamConnection", "AHB import cache miss: id=%llu entries=%zu hits=%llu misses=%llu",
+           (unsigned long long)buffer_id, ahb_import_cache_.size(),
+           (unsigned long long)ahb_cache_hits_, (unsigned long long)ahb_cache_misses_);
+    return true;
+}
+
+bool StreamConnection::_retire_removed_ahb_imports(const std::vector<uint64_t> &buffer_ids) {
+    if (buffer_ids.empty()) return false;
+
+    bool retired = false;
+    {
+        std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+        auto it = ahb_import_cache_.begin();
+        while (it != ahb_import_cache_.end()) {
+            if (std::find(buffer_ids.begin(), buffer_ids.end(), it->buffer_id) != buffer_ids.end()) {
+                pending_free_ahb_imports_.push_back(*it);
+                it = ahb_import_cache_.erase(it);
+                retired = true;
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    if (retired) {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        if (pending_dispatch_cached_ &&
+            std::find(buffer_ids.begin(), buffer_ids.end(), pending_buffer_id_) != buffer_ids.end()) {
+            pending_dispatch_ready_ = false;
+        }
+    }
+    return retired;
+}
+
+bool StreamConnection::_retire_all_ahb_imports() {
+    bool retired = false;
+    {
+        std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+        retired = !ahb_import_cache_.empty();
+        pending_free_ahb_imports_.insert(pending_free_ahb_imports_.end(),
+                                         ahb_import_cache_.begin(), ahb_import_cache_.end());
+        ahb_import_cache_.clear();
+        if (retired) {
+            NF_LOG("StreamConnection", "Retiring AHB import cache: hits=%llu misses=%llu",
+                   (unsigned long long)ahb_cache_hits_,
+                   (unsigned long long)ahb_cache_misses_);
+        }
+        ahb_cache_hits_ = 0;
+        ahb_cache_misses_ = 0;
+    }
+
+    CachedAhbImport pending_uncached;
+    bool retire_pending_uncached = false;
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        if (pending_dispatch_ready_ && !pending_dispatch_cached_) {
+            pending_uncached.generation = pending_generation_;
+            pending_uncached.texture = pending_uncached_texture_;
+            pending_uncached.sampler = pending_uncached_sampler_;
+            pending_uncached.owned_buffer_ptr = pending_uncached_buffer_ptr_;
+            retire_pending_uncached = true;
+        }
+        pending_dispatch_ready_ = false;
+        pending_dispatch_cached_ = false;
+        pending_uncached_texture_ = RID();
+        pending_uncached_sampler_ = RID();
+        pending_uncached_buffer_ptr_ = 0;
+    }
+    if (retire_pending_uncached) {
+        std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+        pending_free_ahb_imports_.push_back(pending_uncached);
+        retired = true;
+    }
+    return retired;
 }
 
 void StreamConnection::_render_compute_dispatch_rt() {
     static int rt_enter = 0;
     if (++rt_enter == 1) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT_ENTER");
-    // Read pending dispatch data
-    RID ycbcr_tex_rid, ycbcr_sampler_rid;
-    uint64_t ahb_ptr;
-    int width, height;
+
+    uint64_t buffer_id = 0;
+    uint64_t generation = 0;
+    RID uncached_texture;
+    RID uncached_sampler;
+    uint64_t uncached_buffer_ptr = 0;
+    int width = 0;
+    int height = 0;
+    bool cached_dispatch = false;
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
-        ycbcr_tex_rid = pending_ycbcr_tex_rid_;
-        ycbcr_sampler_rid = pending_ycbcr_sampler_rid_;
-        ahb_ptr = pending_ahb_ptr_;
+        if (!pending_dispatch_ready_) return;
+        buffer_id = pending_buffer_id_;
+        generation = pending_generation_;
+        uncached_texture = pending_uncached_texture_;
+        uncached_sampler = pending_uncached_sampler_;
+        uncached_buffer_ptr = pending_uncached_buffer_ptr_;
         width = pending_width_;
         height = pending_height_;
-        pending_ahb_ptr_ = 0;
+        cached_dispatch = pending_dispatch_cached_;
+        pending_dispatch_ready_ = false;
+        pending_uncached_texture_ = RID();
+        pending_uncached_sampler_ = RID();
+        pending_uncached_buffer_ptr_ = 0;
     }
-
-    if (ahb_ptr == 0) return;
 
     RenderingDevice *rd = RenderingServer::get_singleton()
         ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
-    if (!rd || !compute_pipeline_ready_) {
-        if (ycbcr_sampler_rid.is_valid() && rd) rd->free_rid(ycbcr_sampler_rid);
-        if (ycbcr_tex_rid.is_valid() && rd) rd->free_rid(ycbcr_tex_rid);
-        AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
+    auto release_uncached = [&]() {
+        if (cached_dispatch) return;
+        if (rd && uncached_sampler.is_valid()) rd->free_rid(uncached_sampler);
+        if (rd && uncached_texture.is_valid()) rd->free_rid(uncached_texture);
+        if (uncached_buffer_ptr != 0) {
+            AHardwareBuffer_release((AHardwareBuffer *)uncached_buffer_ptr);
+            uncached_buffer_ptr = 0;
+        }
+    };
+    if (!rd) {
+        release_uncached();
         return;
     }
 
-    // Dispatch compute shader FIRST (so rgba_output_tex_ has valid data before display)
-    {
-        // Build uniform set
+    // Keep reconfiguration from moving pipeline/output RIDs while this command
+    // is being recorded. Cache retirement itself is queued after this callback.
+    std::lock_guard<std::mutex> state_lock(render_state_mutex_);
+    if (!compute_pipeline_ready_ || generation != render_generation_.load()) {
+        release_uncached();
+        return;
+    }
+
+    RID texture;
+    RID sampler;
+    RID uniform_set;
+    bool uniform_set_owned = !cached_dispatch;
+    if (cached_dispatch) {
+        std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+        auto entry = std::find_if(ahb_import_cache_.begin(), ahb_import_cache_.end(),
+            [buffer_id, generation](const CachedAhbImport &cached) {
+                return cached.buffer_id == buffer_id && cached.generation == generation;
+            });
+        if (entry == ahb_import_cache_.end()) return;
+        texture = entry->texture;
+        sampler = entry->sampler;
+        uniform_set = entry->uniform_set;
+    } else {
+        texture = uncached_texture;
+        sampler = uncached_sampler;
+    }
+
+    if (!uniform_set.is_valid()) {
         Ref<RDUniform> u_sampler;
         u_sampler.instantiate();
         u_sampler->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
         u_sampler->set_binding(0);
-        u_sampler->add_id(ycbcr_sampler_rid);
-        u_sampler->add_id(ycbcr_tex_rid);
+        u_sampler->add_id(sampler);
+        u_sampler->add_id(texture);
 
         Ref<RDUniform> u_output;
         u_output.instantiate();
@@ -212,15 +383,29 @@ void StreamConnection::_render_compute_dispatch_rt() {
         TypedArray<RDUniform> uniforms;
         uniforms.append(u_sampler);
         uniforms.append(u_output);
-
-        RID uniform_set = rd->uniform_set_create(uniforms, compute_shader_, 0);
-        if (!uniform_set.is_valid()) {
-            rd->free_rid(ycbcr_sampler_rid);
-            rd->free_rid(ycbcr_tex_rid);
-            AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
-            return;
+        uniform_set = rd->uniform_set_create(uniforms, compute_shader_, 0);
+        if (cached_dispatch && uniform_set.is_valid()) {
+            std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+            auto entry = std::find_if(ahb_import_cache_.begin(), ahb_import_cache_.end(),
+                [buffer_id, generation](const CachedAhbImport &cached) {
+                    return cached.buffer_id == buffer_id && cached.generation == generation;
+                });
+            if (entry != ahb_import_cache_.end()) {
+                entry->uniform_set = uniform_set;
+            } else {
+                // A buffer-removed callback retired the entry while the uniform
+                // was being built. Keep this set local to the current dispatch.
+                uniform_set_owned = true;
+            }
         }
+    }
+    if (!uniform_set.is_valid()) {
+        release_uncached();
+        return;
+    }
 
+    // Dispatch compute shader FIRST (so rgba_output_tex_ has valid data before display)
+    {
         int64_t cmd = rd->compute_list_begin();
         rd->compute_list_bind_compute_pipeline(cmd, compute_pipeline_);
         rd->compute_list_bind_uniform_set(cmd, uniform_set, 0);
@@ -249,8 +434,6 @@ void StreamConnection::_render_compute_dispatch_rt() {
 
         rd->compute_list_dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
         rd->compute_list_end();
-
-        rd->free_rid(uniform_set);
     }
 
     // One-time per session AFTER first compute dispatch: wire display to rgba_output_tex_
@@ -274,11 +457,9 @@ void StreamConnection::_render_compute_dispatch_rt() {
         }
     }
 
-    // Cleanup
-    rd->free_rid(ycbcr_sampler_rid);
-    rd->free_rid(ycbcr_tex_rid);
+    if (uniform_set_owned) rd->free_rid(uniform_set);
+    if (!cached_dispatch) release_uncached();
 
-    AHardwareBuffer_release((AHardwareBuffer *)ahb_ptr);
     static int rt_done = 0;
     if (++rt_done <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: dispatch complete");
 }
@@ -287,6 +468,20 @@ void StreamConnection::_render_free_pipeline_rt() {
     RenderingDevice *rd = RenderingServer::get_singleton()
         ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
     if (!rd) return;
+
+    std::vector<CachedAhbImport> retired_imports;
+    {
+        std::lock_guard<std::mutex> lock(ahb_cache_mutex_);
+        retired_imports.swap(pending_free_ahb_imports_);
+    }
+    for (const CachedAhbImport &entry : retired_imports) {
+        if (entry.uniform_set.is_valid()) rd->free_rid(entry.uniform_set);
+        if (entry.sampler.is_valid()) rd->free_rid(entry.sampler);
+        if (entry.texture.is_valid()) rd->free_rid(entry.texture);
+        if (entry.owned_buffer_ptr != 0) {
+            AHardwareBuffer_release((AHardwareBuffer *)entry.owned_buffer_ptr);
+        }
+    }
 
     if (pending_free_pipeline_.is_valid()) { rd->free_rid(pending_free_pipeline_); pending_free_pipeline_ = RID(); }
     if (pending_free_shader_.is_valid()) { rd->free_rid(pending_free_shader_); pending_free_shader_ = RID(); }
@@ -426,10 +621,10 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     // Android: ONLY native NDK MediaCodec + ImageReader for zero-copy GPU decode.
     // No FFmpeg fallback. Must fail loudly if unavailable.
 
-    // Shut down any existing codec before reconfiguration
-    // IMPORTANT: don't call shutdown() here — the decode thread may still be
-    // inside a dequeue_frame() call. Just swap the pointer atomically.
-    // Old codecs will be cleaned up in _cb_decoder_cleanup via exchange+shutdown.
+    // Prevent new decode work from entering this render generation. The old
+    // codec is intentionally not destroyed here because a decode call may still
+    // hold the raw pointer (pre-existing lifecycle behavior).
+    self->decoder_ready_.store(false);
     auto *old_codec = self->native_codec_.exchange(nullptr);
     if (old_codec) {
         // Can't safely shutdown or delete here — decode thread may be using it.
@@ -438,24 +633,30 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
         // so it will switch to the new codec on the next loop.
     }
 
-    // Reset compute pipeline state for reconfiguration
-    // IMPORTANT: set compute_pipeline_ready_ = false FIRST so queued render-thread
-    // callbacks will bail out before using resources we're about to free.
-    self->compute_pipeline_ready_ = false;
-    self->display_wired_ = false;
-
-    // Free GPU resources on render thread to guarantee no pending callbacks use them
+    // Start a new render generation before retiring cached imports. The state
+    // lock serializes invalidation with pipeline creation and command recording.
     RenderingServer *rs = RenderingServer::get_singleton();
     RenderingDevice *rd = rs ? rs->get_rendering_device() : nullptr;
+    {
+        std::lock_guard<std::mutex> state_lock(self->render_state_mutex_);
+        self->compute_pipeline_ready_ = false;
+        self->display_wired_ = false;
+        self->render_generation_.fetch_add(1);
+        if (rd) {
+            self->pending_free_pipeline_ = self->compute_pipeline_;
+            self->pending_free_shader_ = self->compute_shader_;
+            self->pending_free_sampler_ = self->dummy_sampler_;
+            self->pending_free_tex_ = self->rgba_output_tex_;
+            self->compute_pipeline_ = RID();
+            self->compute_shader_ = RID();
+            self->dummy_sampler_ = RID();
+            self->rgba_output_tex_ = RID();
+        }
+    }
+    self->_retire_all_ahb_imports();
+
+    // Free old-generation GPU resources after previously queued dispatches.
     if (rd) {
-        self->pending_free_pipeline_ = self->compute_pipeline_;
-        self->pending_free_shader_ = self->compute_shader_;
-        self->pending_free_sampler_ = self->dummy_sampler_;
-        self->pending_free_tex_ = self->rgba_output_tex_;
-        self->compute_pipeline_ = RID();
-        self->compute_shader_ = RID();
-        self->dummy_sampler_ = RID();
-        self->rgba_output_tex_ = RID();
         rs->call_on_render_thread(callable_mp(self, &StreamConnection::_render_free_pipeline_rt));
     }
 
@@ -529,33 +730,52 @@ void StreamConnection::_cb_decoder_stop() {
 void StreamConnection::_cb_decoder_cleanup() {
     NF_LOG("StreamConnection", "Decoder cleanup");
     auto *self = active_instance_;
-    if (self) {
-        if (!self->local_capture_mode_) {
-            self->decoder_->cleanup();
-            self->uploader_->cleanup();
-        }
+    if (!self) return;
+
 #ifdef __ANDROID__
-        // Just swap pointer — don't shutdown while decode thread may be active.
-        // Final cleanup happens in destructor after decode thread is joined.
-        self->native_codec_.exchange(nullptr);
-        // Free compute pipeline resources
-        RenderingDevice *rd = RenderingServer::get_singleton()
-            ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
-        if (rd) {
-            if (self->compute_pipeline_.is_valid()) rd->free_rid(self->compute_pipeline_);
-            if (self->compute_shader_.is_valid()) rd->free_rid(self->compute_shader_);
-            if (self->dummy_sampler_.is_valid()) rd->free_rid(self->dummy_sampler_);
-            if (self->rgba_output_tex_.is_valid()) rd->free_rid(self->rgba_output_tex_);
-        }
+    // Invalidate render state before uploader cleanup so no queued dispatch can
+    // pass its generation guard and then touch an uploader being torn down.
+    self->decoder_ready_.store(false);
+    self->native_codec_.exchange(nullptr);
+
+    RenderingServer *rs = RenderingServer::get_singleton();
+    RenderingDevice *rd = rs ? rs->get_rendering_device() : nullptr;
+    {
+        std::lock_guard<std::mutex> state_lock(self->render_state_mutex_);
         self->compute_pipeline_ready_ = false;
-#endif
-        self->decoder_ready_.store(false);
-        self->h264_hw_upgrade_pending_.store(false);
-        self->h264_hw_upgraded_.store(false);
-        if (self->h264_extradata_) {
-            av_freep(&self->h264_extradata_);
-            self->h264_extradata_size_ = 0;
+        self->render_generation_.fetch_add(1);
+        if (rd) {
+            self->pending_free_pipeline_ = self->compute_pipeline_;
+            self->pending_free_shader_ = self->compute_shader_;
+            self->pending_free_sampler_ = self->dummy_sampler_;
+            self->pending_free_tex_ = self->rgba_output_tex_;
+            self->compute_pipeline_ = RID();
+            self->compute_shader_ = RID();
+            self->dummy_sampler_ = RID();
+            self->rgba_output_tex_ = RID();
         }
+    }
+    self->_retire_all_ahb_imports();
+#endif
+
+    if (!self->local_capture_mode_) {
+        self->decoder_->cleanup();
+        self->uploader_->cleanup();
+    }
+
+#ifdef __ANDROID__
+    // Cleanup may be followed immediately by destruction. Avoid adding a new
+    // member callback that could outlive StreamConnection; the original path
+    // also released these resources synchronously here.
+    if (rd) self->_render_free_pipeline_rt();
+#endif
+
+    self->decoder_ready_.store(false);
+    self->h264_hw_upgrade_pending_.store(false);
+    self->h264_hw_upgraded_.store(false);
+    if (self->h264_extradata_) {
+        av_freep(&self->h264_extradata_);
+        self->h264_extradata_size_ = 0;
     }
 }
 
@@ -867,8 +1087,18 @@ void StreamConnection::_decode_thread_func() {
         if (!pkt) continue;
 
 #ifdef __ANDROID__
+        uint64_t decode_generation = render_generation_.load();
         AndroidMediaCodec *codec = native_codec_.load();
         if (codec && decoder_ready_.load()) {
+            std::vector<uint64_t> removed_buffer_ids;
+            codec->take_removed_buffer_ids(removed_buffer_ids);
+            if (_retire_removed_ahb_imports(removed_buffer_ids)) {
+                RenderingServer *rs = RenderingServer::get_singleton();
+                if (rs) {
+                    rs->call_on_render_thread(callable_mp(this, &StreamConnection::_render_free_pipeline_rt));
+                }
+            }
+
             // Native MediaCodec path: feed raw packet data, get AHB frames
             int send_ret = codec->feed_packet(pkt->data, (size_t)pkt->size, pkt->pts);
             av_packet_free(&pkt);
@@ -888,69 +1118,110 @@ void StreamConnection::_decode_thread_func() {
                     continue;
                 }
 
-                // One-time compute pipeline setup
-                _ensure_compute_pipeline(rd, frame.width, frame.height);
-
-                if (!compute_pipeline_ready_) {
+                if (!decoder_ready_.load() || decode_generation != render_generation_.load()) {
                     codec->release_frame(frame);
                     continue;
                 }
 
-                // Import AHB as YCbCr texture (engine patch handles Vulkan image creation + YCbCr conversion)
-                int usage = (int)(RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT);
-                static int tc_log = 0;
-                if (++tc_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "calling texture_create_from_android_hardware_buffer");
-                Variant tex_rid_var = rd->call("texture_create_from_android_hardware_buffer",
-                    (uint64_t)frame.buffer,
-                    (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
-                    frame.width, frame.height, usage);
-                RID ycbcr_tex_rid = tex_rid_var;
-                static int a_log = 0;
-                if (++a_log <= 1) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "AHB_OK");
+                // One-time compute pipeline setup for the generation that fed
+                // this frame. Old-codec frames cannot initialize new resources.
+                _ensure_compute_pipeline(rd, frame.width, frame.height, decode_generation);
 
-                if (!ycbcr_tex_rid.is_valid()) {
+                if (!decoder_ready_.load() || !compute_pipeline_ready_ ||
+                    decode_generation != render_generation_.load()) {
                     codec->release_frame(frame);
                     continue;
                 }
 
-                // Get YCbCr sampler for this texture
-                Variant sampler_var = rd->call("texture_get_ycbcr_sampler", ycbcr_tex_rid);
-                RID ycbcr_sampler_rid = sampler_var;
-                static int s_log = 0;
-                if (++s_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "YCbCr sampler valid=%d", (int)ycbcr_sampler_rid.is_valid());
+                bool cache_enabled = codec->is_import_cache_enabled();
+                uint64_t buffer_id = 0;
+                RID uncached_texture;
+                RID uncached_sampler;
+                uint64_t uncached_buffer_ptr = 0;
 
-                if (!ycbcr_sampler_rid.is_valid()) {
-                    rd->free_rid(ycbcr_tex_rid);
+                if (cache_enabled) {
+                    if (!codec->get_buffer_id(frame.buffer, buffer_id)) {
+                        // API 31 introduced the documented stable ID. The
+                        // buffer-removed listener supplies matching handle keys
+                        // on older Quest OS releases.
+                        buffer_id = (uint64_t)frame.buffer;
+                        static bool warned_pointer_key = false;
+                        if (!warned_pointer_key) {
+                            warned_pointer_key = true;
+                            NF_LOG("StreamConnection", "Using AHardwareBuffer handle cache keys below API 31");
+                        }
+                    }
+
+                    if (!_get_or_create_ahb_import(rd, (uint64_t)frame.buffer,
+                                                   buffer_id, frame.width, frame.height,
+                                                   decode_generation)) {
+                        codec->release_frame(frame);
+                        continue;
+                    }
+                } else {
+                    int usage = (int)RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT;
+                    Variant texture_var = rd->call("texture_create_from_android_hardware_buffer",
+                        (uint64_t)frame.buffer,
+                        (int)RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
+                        frame.width, frame.height, usage);
+                    uncached_texture = texture_var;
+                    if (!uncached_texture.is_valid()) {
+                        codec->release_frame(frame);
+                        continue;
+                    }
+
+                    Variant sampler_var = rd->call("texture_get_ycbcr_sampler", uncached_texture);
+                    uncached_sampler = sampler_var;
+                    if (!uncached_sampler.is_valid()) {
+                        rd->free_rid(uncached_texture);
+                        codec->release_frame(frame);
+                        continue;
+                    }
+
+                    AHardwareBuffer_acquire(frame.buffer);
+                    uncached_buffer_ptr = (uint64_t)frame.buffer;
+                }
+
+                RenderingServer *rs = RenderingServer::get_singleton();
+                if (!rs) {
+                    if (!cache_enabled) {
+                        rd->free_rid(uncached_sampler);
+                        rd->free_rid(uncached_texture);
+                        AHardwareBuffer_release(frame.buffer);
+                    }
                     codec->release_frame(frame);
                     continue;
                 }
 
-                // Acquire AHB reference for render thread
-                AHardwareBuffer_acquire(frame.buffer);
-                static int acq_log = 0;
-                if (++acq_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "AHB acquired, storing pending dispatch");
-
-                // Store pending dispatch data (RIDs don't cross threads well via call_on_render_thread.bind)
+                RID replaced_texture;
+                RID replaced_sampler;
+                uint64_t replaced_buffer_ptr = 0;
                 {
                     std::lock_guard<std::mutex> lock(pending_mutex_);
-                    pending_ycbcr_tex_rid_ = ycbcr_tex_rid;
-                    pending_ycbcr_sampler_rid_ = ycbcr_sampler_rid;
-                    pending_ahb_ptr_ = (uint64_t)frame.buffer;
+                    if (pending_dispatch_ready_ && !pending_dispatch_cached_) {
+                        replaced_texture = pending_uncached_texture_;
+                        replaced_sampler = pending_uncached_sampler_;
+                        replaced_buffer_ptr = pending_uncached_buffer_ptr_;
+                    }
+                    pending_buffer_id_ = buffer_id;
+                    pending_generation_ = decode_generation;
+                    pending_uncached_texture_ = uncached_texture;
+                    pending_uncached_sampler_ = uncached_sampler;
+                    pending_uncached_buffer_ptr_ = uncached_buffer_ptr;
                     pending_width_ = frame.width;
                     pending_height_ = frame.height;
+                    pending_dispatch_cached_ = cache_enabled;
+                    pending_dispatch_ready_ = true;
+                }
+                if (replaced_sampler.is_valid()) rd->free_rid(replaced_sampler);
+                if (replaced_texture.is_valid()) rd->free_rid(replaced_texture);
+                if (replaced_buffer_ptr != 0) {
+                    AHardwareBuffer_release((AHardwareBuffer *)replaced_buffer_ptr);
                 }
 
-                // Marshal compute dispatch to render thread
-                RenderingServer *rs = RenderingServer::get_singleton();
-                if (rs) {
-                    rs->call_on_render_thread(callable_mp(this, &StreamConnection::_render_compute_dispatch_rt));
-                    static int q_log = 0;
-                    if (++q_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "CALL queued rt=%d", q_log);
-                } else {
-                    AHardwareBuffer_release(frame.buffer);
-                    rd->free_rid(ycbcr_sampler_rid);
-                    rd->free_rid(ycbcr_tex_rid);
-                }
+                rs->call_on_render_thread(callable_mp(this, &StreamConnection::_render_compute_dispatch_rt));
+                static int q_log = 0;
+                if (++q_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "CALL queued rt=%d", q_log);
 
                 frames_decoded_.fetch_add(1);
                 static int log_count = 0;

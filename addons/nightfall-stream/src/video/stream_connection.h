@@ -144,6 +144,15 @@ private:
     AVColorRange current_color_range_ = AVCOL_RANGE_UNSPECIFIED;
     bool local_capture_mode_ = false;
 #ifdef __ANDROID__
+    struct CachedAhbImport {
+        uint64_t buffer_id = 0;
+        uint64_t generation = 0;
+        RID texture;
+        RID sampler;
+        RID uniform_set;
+        uint64_t owned_buffer_ptr = 0;
+    };
+
     std::atomic<AndroidMediaCodec *> native_codec_{nullptr};
     // Compute pipeline for YCbCr → RGBA conversion
     RID compute_shader_;
@@ -156,20 +165,39 @@ private:
     int native_video_height_ = 0;
     int native_color_range_ = 0;
     int native_color_matrix_type_ = 0;
-    void _ensure_compute_pipeline(RenderingDevice *rd, int width, int height);
-    void _render_compute_dispatch(RID ycbcr_tex_rid, RID ycbcr_sampler_rid, uint64_t ahb_ptr, int width, int height);
-    void _render_compute_dispatch_rt(); // Called on render thread, reads pending_ members
-    void _render_free_pipeline_rt(); // Called on render thread, frees old pipeline resources
-    RID pending_ycbcr_tex_rid_;
-    RID pending_ycbcr_sampler_rid_;
+
+    void _ensure_compute_pipeline(RenderingDevice *rd, int width, int height,
+                                  uint64_t generation);
+    bool _get_or_create_ahb_import(RenderingDevice *rd, uint64_t buffer_ptr,
+                                   uint64_t buffer_id, int width, int height,
+                                   uint64_t generation);
+    bool _retire_removed_ahb_imports(const std::vector<uint64_t> &buffer_ids);
+    bool _retire_all_ahb_imports();
+    void _render_compute_dispatch_rt();
+    void _render_free_pipeline_rt();
+
     RID pending_free_pipeline_;
     RID pending_free_shader_;
     RID pending_free_sampler_;
     RID pending_free_tex_;
-    uint64_t pending_ahb_ptr_ = 0;
+
+    std::atomic<uint64_t> render_generation_{1};
+    std::mutex render_state_mutex_;
+    uint64_t pending_buffer_id_ = 0;
+    uint64_t pending_generation_ = 0;
+    RID pending_uncached_texture_;
+    RID pending_uncached_sampler_;
+    uint64_t pending_uncached_buffer_ptr_ = 0;
     int pending_width_ = 0, pending_height_ = 0;
-    int pending_color_range_ = 0, pending_color_matrix_type_ = 0;
+    bool pending_dispatch_cached_ = false;
+    bool pending_dispatch_ready_ = false;
     std::mutex pending_mutex_;
+
+    std::vector<CachedAhbImport> ahb_import_cache_;
+    std::vector<CachedAhbImport> pending_free_ahb_imports_;
+    uint64_t ahb_cache_hits_ = 0;
+    uint64_t ahb_cache_misses_ = 0;
+    std::mutex ahb_cache_mutex_;
 #endif
 };
 

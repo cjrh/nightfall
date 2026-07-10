@@ -142,7 +142,7 @@ endif()
 
 if(ANDROID)
     target_compile_definitions(${LIBNAME} PRIVATE _FORTIFY_SOURCE=0)
-    target_link_libraries(${LIBNAME} PRIVATE atomic m log)
+    target_link_libraries(${LIBNAME} PRIVATE atomic m log dl android mediandk)
 endif()
 
 if(WIN32)

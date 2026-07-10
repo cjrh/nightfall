@@ -3,9 +3,25 @@
 #ifdef __ANDROID__
 #include "nf_log.h"
 #include <cstring>
+#include <dlfcn.h>
 #include <unistd.h>
 
 namespace godot {
+
+namespace {
+using AHardwareBufferGetIdFn = int (*)(const AHardwareBuffer *, uint64_t *);
+
+AHardwareBufferGetIdFn get_hardware_buffer_id_fn() {
+    static auto fn = reinterpret_cast<AHardwareBufferGetIdFn>(
+        dlsym(RTLD_DEFAULT, "AHardwareBuffer_getId"));
+    return fn;
+}
+
+bool query_hardware_buffer_id(AHardwareBuffer *buffer, uint64_t &out_id) {
+    auto fn = get_hardware_buffer_id_fn();
+    return buffer && fn && fn(buffer, &out_id) == 0 && out_id != 0;
+}
+} // namespace
 
 AndroidMediaCodec::AndroidMediaCodec() = default;
 
@@ -26,9 +42,23 @@ bool AndroidMediaCodec::init(const char *mime, int width, int height) {
         return false;
     }
 
+    AImageReader_BufferRemovedListener listener{};
+    listener.context = this;
+    listener.onBufferRemoved = &AndroidMediaCodec::_on_buffer_removed;
+    status = AImageReader_setBufferRemovedListener(reader_, &listener);
+    if (status == AMEDIA_OK) {
+        buffer_cache_supported_.store(true);
+        NF_LOG("AndroidMediaCodec", "AHardwareBuffer import cache enabled (%s keys)",
+               get_hardware_buffer_id_fn() ? "stable ID" : "opaque handle");
+    } else {
+        // Decoding remains available with the original per-frame import path.
+        NF_LOGE("AndroidMediaCodec", "AHardwareBuffer import cache disabled; buffer listener failed: %d", status);
+    }
+
     status = AImageReader_getWindow(reader_, &window_);
     if (status != AMEDIA_OK || !window_) {
         NF_LOGE("AndroidMediaCodec", "AImageReader_getWindow failed: %d", status);
+        buffer_cache_supported_.store(false);
         AImageReader_delete(reader_);
         reader_ = nullptr;
         return false;
@@ -109,9 +139,40 @@ void AndroidMediaCodec::shutdown() {
         window_ = nullptr;
     }
     if (reader_) {
+        buffer_cache_supported_.store(false);
         AImageReader_delete(reader_);
         reader_ = nullptr;
     }
+    {
+        std::lock_guard<std::mutex> lock(removed_buffers_mutex_);
+        removed_buffer_ids_.clear();
+    }
+}
+
+bool AndroidMediaCodec::get_buffer_id(AHardwareBuffer *buffer, uint64_t &out_id) const {
+    return buffer_cache_supported_.load() && query_hardware_buffer_id(buffer, out_id);
+}
+
+void AndroidMediaCodec::take_removed_buffer_ids(std::vector<uint64_t> &out_ids) {
+    std::lock_guard<std::mutex> lock(removed_buffers_mutex_);
+    out_ids.swap(removed_buffer_ids_);
+}
+
+void AndroidMediaCodec::_on_buffer_removed(void *context, AImageReader *,
+                                            AHardwareBuffer *buffer) {
+    auto *self = static_cast<AndroidMediaCodec *>(context);
+    if (!self || !self->buffer_cache_supported_.load()) return;
+
+    uint64_t buffer_id = 0;
+    if (!query_hardware_buffer_id(buffer, buffer_id)) {
+        // API 26-30 have removal callbacks but no documented stable ID API.
+        // Retained imported memory keeps this opaque handle alive, so use the
+        // same best-effort identity as the decode path on those releases.
+        buffer_id = (uint64_t)buffer;
+    }
+
+    std::lock_guard<std::mutex> lock(self->removed_buffers_mutex_);
+    self->removed_buffer_ids_.push_back(buffer_id);
 }
 
 bool AndroidMediaCodec::feed_packet(const uint8_t *data, size_t size, int64_t pts) {
