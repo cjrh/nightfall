@@ -155,6 +155,7 @@ var state_manager: StateManager
 var host_discovery: HostDiscovery
 var controller_mapper: ControllerMapper
 var comp: CompositionLayerManager
+var bg_manager: BackgroundManager
 
 var comp_cylinder: Node3D = null
 var _comp_cyl_center := Vector3.ZERO
@@ -481,7 +482,7 @@ func _on_connect_timeout():
 		return
 	_connect_timeout_pending = false
 	_log("[CONNECT] Connection timed out")
-	_ui_status_label.text = "Failed to connect (timeout)"
+	ui_controller.set_status("Failed to connect (timeout)")
 	welcome_screen.reset_connect_button()
 	stream_backend.stop_play_stream()
 
@@ -501,10 +502,10 @@ func _on_stream_started():
 	_connect_timeout_pending = false
 	_reconnecting = false
 	_last_activity_time = Time.get_ticks_msec() / 1000.0
-	_ui_status_label.text = "Connecting..."
+	ui_controller.set_status("Connecting...")
 	ui_controller.update_host_label()
 	welcome_screen.reset_connect_button()
-	if _ui_disconnect_btn: _ui_disconnect_btn.visible = true
+	ui_controller.set_disconnect_visible(true)
 	_log("[STREAM] Connection started!")
 	if not comp.in_use:
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -554,7 +555,7 @@ func _on_stream_terminated(msg: String, err_code: int = 0):
 	if auto_reconnect_enabled and err_code != 0:
 		_log("[RECONNECT] Keeping stream alive for auto-reconnect")
 		is_streaming = false
-		_ui_status_label.text = "Connection lost, reconnecting..."
+		ui_controller.set_status("Connection lost, reconnecting...")
 		return
 	_reconnecting = false
 	is_streaming = false
@@ -564,8 +565,8 @@ func _full_disconnect_cleanup(status_msg: String):
 	_connect_timeout_pending = false
 	_server_codec_support = {}
 	ui_controller.update_codec_btn()
-	_ui_status_label.text = status_msg
-	if _ui_disconnect_btn: _ui_disconnect_btn.visible = false
+	ui_controller.set_status(status_msg)
+	ui_controller.set_disconnect_visible(false)
 	_log("[STREAM] Full disconnect: %s" % status_msg)
 	welcome_screen.show_welcome_screen("welcome")
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -714,7 +715,7 @@ func _ready():
 	if v2_node.has_signal("reconnect_scheduled"):
 		v2_node.reconnect_scheduled.connect(func(attempt, max_attempts, delay_ms):
 			_reconnecting = true
-			_ui_status_label.text = "Reconnecting %d/%d in %ds..." % [attempt, max_attempts, delay_ms / 1000]
+			ui_controller.set_status("Reconnecting %d/%d in %ds..." % [attempt, max_attempts, delay_ms / 1000])
 			_log("[RECONNECT] Attempt %d/%d in %dms" % [attempt, max_attempts, delay_ms])
 		)
 	if v2_node.has_signal("reconnect_failed"):
@@ -1052,8 +1053,7 @@ func _toggle_ui():
 		if comp_ui:
 			comp_ui.visible = false
 		_restore_ui_material()
-	if _ui_disconnect_btn:
-		_ui_disconnect_btn.visible = is_streaming
+	ui_controller.set_disconnect_visible(is_streaming)
 
 var _ui_saved_offset: Vector3 = Vector3.ZERO
 var _ui_saved_rot_y: float = 0.0
@@ -1204,156 +1204,24 @@ func _create_contact_dot():
 	add_child(pointer_cursor)
 
 func _hide_all_backgrounds():
-	for name in bg_names:
-		var bg = get_node_or_null(name)
-		if bg:
-			bg.visible = false
-			bg.emitting = false
+	if bg_manager:
+		bg_manager.hide_all()
 
 func _create_backgrounds():
-	_create_starfield()
-	_create_ash()
-	_create_snow()
-	_create_data()
-	var active_bg = passthrough_mode - 2
-	for i in range(bg_names.size()):
-		var bg = get_node_or_null(bg_names[i])
-		if bg:
-			bg.visible = (i == active_bg)
+	bg_manager = BackgroundManager.new(self)
+	bg_manager.create_backgrounds()
 
 func _create_starfield():
-	var particles = GPUParticles3D.new()
-	particles.name = "Starfield"
-	particles.emitting = true
-	particles.amount = 80
-	particles.lifetime = 30.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 30
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(50, 50, 50)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	var vel = mat.direction
-	vel = Vector3(0, 0, 0)
-	mat.direction = vel
-	mat.spread = 0.0
-	particles.process_material = mat
-	var star_mesh = SphereMesh.new()
-	star_mesh.radius = 0.05
-	star_mesh.height = 0.1
-	var star_shader = load("res://src/shaders/star.gdshader")
-	var star_mat = ShaderMaterial.new()
-	star_mat.shader = star_shader
-	star_mat.render_priority = -128
-	star_mesh.material = star_mat
-	particles.draw_pass_1 = star_mesh
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position
-	add_child(particles)
+	bg_manager._create_starfield()
 
 func _create_ash():
-	var particles = GPUParticles3D.new()
-	particles.name = "Ash"
-	particles.emitting = true
-	particles.amount = 200
-	particles.lifetime = 4.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 30
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(30, 30, 30)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3.ZERO
-	mat.direction = Vector3(0, 0, 1)
-	mat.spread = 30.0
-	mat.initial_velocity_min = 15.0
-	mat.initial_velocity_max = 35.0
-	particles.process_material = mat
-	var dot = SphereMesh.new()
-	dot.radius = 0.04
-	dot.height = 0.08
-	var sh = load("res://src/shaders/warp.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	dot.material = sm
-	particles.draw_pass_1 = dot
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position
-	add_child(particles)
+	bg_manager._create_ash()
 
 func _create_snow():
-	var particles = GPUParticles3D.new()
-	particles.name = "Snow"
-	particles.emitting = true
-	particles.amount = 150
-	particles.lifetime = 15.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 30
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(20, 2, 20)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3(0, -1.0, 0)
-	mat.direction = Vector3(0, -1, 0)
-	mat.spread = 15.0
-	mat.initial_velocity_min = 0.3
-	mat.initial_velocity_max = 1.0
-	particles.process_material = mat
-	var flake = QuadMesh.new()
-	flake.size = Vector2(0.075, 0.075)
-	var sh = load("res://src/shaders/snow.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	flake.material = sm
-	particles.draw_pass_1 = flake
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position + Vector3(0, 10, 0)
-	add_child(particles)
+	bg_manager._create_snow()
 
 func _create_data():
-	var particles = GPUParticles3D.new()
-	particles.name = "Data"
-	particles.emitting = true
-	particles.amount = 250
-	particles.lifetime = 6.0
-	particles.explosiveness = 0.0
-	particles.randomness = 1.0
-	particles.fixed_fps = 30
-	particles.local_coords = true
-	particles.visible = false
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	mat.emission_box_extents = Vector3(50, 2, 50)
-	mat.particle_flag_disable_z = false
-	mat.gravity = Vector3(0, 3.0, 0)
-	mat.direction = Vector3(0, 1, 0)
-	mat.spread = 5.0
-	mat.initial_velocity_min = 1.0
-	mat.initial_velocity_max = 3.0
-	particles.process_material = mat
-	var quad = QuadMesh.new()
-	quad.size = Vector2(0.3, 1.0)
-	var sh = load("res://src/shaders/datastream.gdshader")
-	var sm = ShaderMaterial.new()
-	sm.shader = sh
-	sm.render_priority = -128
-	quad.material = sm
-	particles.draw_pass_1 = quad
-	particles.sorting_offset = -100.0
-	particles.position = xr_camera.global_position + Vector3(0, -3, 0)
-	add_child(particles)
+	bg_manager._create_data()
 
 func _create_hand_visualizer(is_left: bool) -> Node3D:
 	var hand_vis = Node3D.new()

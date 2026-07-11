@@ -614,3 +614,11 @@ func make_indicator_btn(label_text: String, value_text: String) -> Button:
 
 func update_indicator_btn(btn: Button, label: String, value: String):
 	btn.text = label + ": " + value
+
+func set_status(text: String):
+	if main._ui_status_label:
+		main._ui_status_label.text = text
+
+func set_disconnect_visible(vis: bool):
+	if main._ui_disconnect_btn:
+		main._ui_disconnect_btn.visible = vis
