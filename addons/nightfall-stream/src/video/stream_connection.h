@@ -1,5 +1,6 @@
 #pragma once
 
+#include "video/decode_unit_queue.h"
 #include "video/depth_bridge.h"
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -125,7 +126,7 @@ private:
     std::atomic<int> last_frame_latency_us_{0};
     std::atomic<int64_t> last_submit_time_us_{0};
 
-    std::vector<AVPacket *> packet_queue_;
+    DecodeUnitQueue packet_queue_;
     mutable std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
     std::thread decode_thread_;

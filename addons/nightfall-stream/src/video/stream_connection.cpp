@@ -855,23 +855,28 @@ int StreamConnection::_cb_submit_decode_unit(PDECODE_UNIT decodeUnit) {
     auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     self->last_submit_time_us_.store(now_us);
 
+    DecodeUnitQueue::DecodeUnit queued_unit;
+    queued_unit.packet.reset(pkt);
+    queued_unit.is_idr = decodeUnit->frameType == FRAME_TYPE_IDR;
+    queued_unit.frame_number = decodeUnit->frameNumber;
+    queued_unit.presentation_time_us = decodeUnit->presentationTimeUs;
+
+    DecodeUnitQueue::PushResult enqueue_result;
     {
         std::lock_guard<std::mutex> lock(self->queue_mutex_);
-        if (self->packet_queue_.size() > 512) {
-            av_packet_free(&pkt);
-            self->frames_dropped_.fetch_add(1);
-            return DR_OK;
-        }
-        if (!self->decoder_->is_hw_decode() && self->packet_queue_.size() > 128) {
-            self->_clear_packet_queue();
-            LiRequestIdrFrame();
-            av_packet_free(&pkt);
-            self->frames_dropped_.fetch_add(1);
-            return DR_NEED_IDR;
-        }
-        self->packet_queue_.push_back(pkt);
+        enqueue_result = self->packet_queue_.push(std::move(queued_unit));
     }
-    self->queue_cv_.notify_one();
+
+    if (enqueue_result.dropped != 0) {
+        self->frames_dropped_.fetch_add((int)enqueue_result.dropped);
+    }
+    if (enqueue_result.request_idr) {
+        LiRequestIdrFrame();
+        return DR_NEED_IDR;
+    }
+    if (enqueue_result.accepted) {
+        self->queue_cv_.notify_one();
+    }
 
     return DR_OK;
 }
@@ -1076,6 +1081,7 @@ void StreamConnection::_connection_thread_func() {
 }
 
 void StreamConnection::_decode_thread_func() {
+    std::optional<DecodeUnitQueue::DecodeUnit> queued_unit;
     AVPacket *pkt = nullptr;
 #ifdef __ANDROID__
     bool native_input_blocked = false;
@@ -1090,6 +1096,7 @@ void StreamConnection::_decode_thread_func() {
     }
 
     while (true) {
+        queued_unit.reset();
         pkt = nullptr;
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
@@ -1118,8 +1125,10 @@ void StreamConnection::_decode_thread_func() {
                 && !native_input_blocked
 #endif
             ) {
-                pkt = packet_queue_.front();
-                packet_queue_.erase(packet_queue_.begin());
+                queued_unit = packet_queue_.pop();
+                if (queued_unit) {
+                    pkt = queued_unit->packet.get();
+                }
             }
         }
 
@@ -1154,17 +1163,29 @@ void StreamConnection::_decode_thread_func() {
 
                 if (feed_result == AndroidMediaCodec::FeedResult::QUEUED) {
                     native_input_blocked = false;
-                    av_packet_free(&pkt);
+                    queued_unit.reset();
+                    pkt = nullptr;
                 } else if (feed_result == AndroidMediaCodec::FeedResult::BACKPRESSURE) {
                     native_input_blocked = !stale_codec;
-                    std::lock_guard<std::mutex> lock(queue_mutex_);
-                    packet_queue_.insert(packet_queue_.begin(), pkt);
+                    DecodeUnitQueue::PushResult requeue_result;
+                    {
+                        std::lock_guard<std::mutex> lock(queue_mutex_);
+                        requeue_result = packet_queue_.return_front(std::move(*queued_unit));
+                    }
+                    queued_unit.reset();
                     pkt = nullptr;
+                    if (requeue_result.dropped != 0) {
+                        frames_dropped_.fetch_add((int)requeue_result.dropped);
+                    }
+                    if (requeue_result.request_idr) {
+                        LiRequestIdrFrame();
+                    }
                 } else {
                     NF_LOGE("StreamConnection", "Native MediaCodec input failed; terminating stream");
                     decoder_ready_.store(false);
                     is_streaming_.store(false);
-                    av_packet_free(&pkt);
+                    queued_unit.reset();
+                    pkt = nullptr;
                     queue_cv_.notify_all();
                     LiInterruptConnection();
                 }
@@ -1347,14 +1368,16 @@ void StreamConnection::_decode_thread_func() {
                     }
                 }
             }
-            av_packet_free(&pkt);
+            queued_unit.reset();
+            pkt = nullptr;
             continue;
         }
 
         {
             AVCodecContext *ctx = decoder_->get_codec_context();
             if (!ctx) {
-                av_packet_free(&pkt);
+                queued_unit.reset();
+                pkt = nullptr;
                 continue;
             }
 
@@ -1406,7 +1429,8 @@ void StreamConnection::_decode_thread_func() {
 
             int send_ret = avcodec_send_packet(ctx, pkt);
 
-            av_packet_free(&pkt);
+            queued_unit.reset();
+            pkt = nullptr;
 
             if (send_ret < 0 && send_ret != AVERROR(EAGAIN) && send_ret != AVERROR_EOF) {
                 continue;
@@ -1542,9 +1566,6 @@ void StreamConnection::_decode_thread_func() {
 }
 
 void StreamConnection::_clear_packet_queue() {
-    for (auto *p : packet_queue_) {
-        av_packet_free(&p);
-    }
     packet_queue_.clear();
 }
 

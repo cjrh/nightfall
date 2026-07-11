@@ -9,6 +9,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 project(${LIBNAME} LANGUAGES CXX)
+include(CTest)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -182,5 +183,14 @@ if(TARGET_PLATFORM STREQUAL "linux" OR TARGET_PLATFORM STREQUAL "steamos")
             ${FFMPEG_LIBRARIES}
             pthread dl
         )
+
+        if(BUILD_TESTING)
+            add_executable(decode_unit_queue_test
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../test/decode_unit_queue_test.cpp")
+            target_compile_features(decode_unit_queue_test PRIVATE cxx_std_17)
+            target_include_directories(decode_unit_queue_test PRIVATE src ${FFMPEG_INCLUDE_DIRS})
+            target_link_libraries(decode_unit_queue_test PRIVATE ${FFMPEG_LIBRARIES})
+            add_test(NAME decode_unit_queue COMMAND decode_unit_queue_test)
+        endif()
     endif()
 endif()
