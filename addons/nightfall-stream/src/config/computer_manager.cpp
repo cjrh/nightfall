@@ -68,7 +68,7 @@ void NightfallComputerManager::_step_pair() {
 
     is_requesting = true;
     String base_url = "http://" + pair_ip + ":" + String::num_int64(pair_port) + "/pair";
-    String common_params = "uniqueid=" + unique_id + "&uuid=" + current_uuid + "&devicename=nightfall&updateState=1";
+	String common_params = "uniqueid=" + unique_id + "&uuid=" + current_uuid + "&devicename=nightfall";
 
     Dictionary ssl_opts;
 
@@ -801,14 +801,24 @@ PackedByteArray NightfallComputerManager::_hex_to_bytes(const String &hex) {
 }
 
 String NightfallComputerManager::_extract_xml_value(const String &xml, const String &tag) {
-    String start_tag = "<" + tag + ">";
-    String end_tag = "</" + tag + ">";
-    int start = xml.find(start_tag);
-    if (start == -1) return "";
-    start += start_tag.length();
-    int end = xml.find(end_tag, start);
-    if (end == -1) return "";
-    return xml.substr(start, end - start);
+	String start_tag = "<" + tag + ">";
+	String end_tag = "</" + tag + ">";
+	int start = xml.find(start_tag);
+	if (start == -1) {
+		String xml_lower = xml.to_lower();
+		String tag_lower = tag.to_lower();
+		String start_lower = "<" + tag_lower + ">";
+		String end_lower = "</" + tag_lower + ">";
+		start = xml_lower.find(start_lower);
+		if (start == -1) return "";
+		int end = xml_lower.find(end_lower, start + start_lower.length());
+		if (end == -1) return "";
+		return xml.substr(start + start_lower.length(), end - (start + start_lower.length()));
+	}
+	start += start_tag.length();
+	int end = xml.find(end_tag, start);
+	if (end == -1) return "";
+	return xml.substr(start, end - start);
 }
 
 String NightfallComputerManager::_get_unique_id() {
@@ -826,7 +836,17 @@ String NightfallComputerManager::_get_unique_id() {
 }
 
 String NightfallComputerManager::_get_uuid() {
-    return _bytes_to_hex(_generate_random_bytes(16));
+	if (!config_manager.is_valid()) {
+		return _bytes_to_hex(_generate_random_bytes(16)).to_upper();
+	}
+	Ref<ConfigFile> cfg = config_manager->get_config();
+	if (cfg.is_valid() && cfg->has_section_key("General", "uuid")) {
+		String existing = cfg->get_value("General", "uuid", "");
+		if (!existing.is_empty()) return existing;
+	}
+	String uid = _bytes_to_hex(_generate_random_bytes(16)).to_upper();
+	config_manager->set_custom_data(NightfallConfigManager::TARGET_GLOBAL, 0, 0, "uuid", uid);
+	return uid;
 }
 
 Dictionary NightfallComputerManager::_get_ssl_options() {
