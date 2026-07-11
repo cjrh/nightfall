@@ -42,16 +42,16 @@ func cycle_ai_3d_mode():
 
 func apply_stereo():
 	var mode = get_stereo_mode()
-	if main.comp_layer_available:
+	if main.comp.available:
 		if mode > 0:
-			main._switch_to_stereo_comp_layer()
+			main.comp.switch_to_stereo_comp_layer()
 		else:
-			main._switch_to_comp_layer()
+			main.comp.switch_to_comp_layer()
 	else:
-		if mode > 0 and main.use_comp_layer:
-			main._switch_to_mesh_rendering()
-		elif mode == 0 and not main.use_comp_layer and main.is_streaming:
-			main._switch_to_comp_layer()
+		if mode > 0 and main.comp.in_use:
+			main.comp.switch_to_mesh_rendering()
+		elif mode == 0 and not main.comp.in_use and main.is_streaming:
+			main.comp.switch_to_comp_layer()
 	if main.screen_mesh.material_override is ShaderMaterial:
 		main.screen_mesh.material_override.set_shader_parameter("stereo_mode", mode)
 	if main.depth_estimator:

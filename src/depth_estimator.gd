@@ -49,7 +49,7 @@ func setup():
 func bind_stream_texture():
 	if not depth_target:
 		return
-	if main.use_comp_layer and main.comp_viewport:
+	if main.comp.in_use and main.comp_viewport:
 		depth_target.texture = main.comp_viewport.get_texture()
 	elif main.stream_viewport:
 		depth_target.texture = main.stream_viewport.get_texture()

@@ -154,6 +154,7 @@ var settings_controller: SettingsController
 var state_manager: StateManager
 var host_discovery: HostDiscovery
 var controller_mapper: ControllerMapper
+var comp: CompositionLayerManager
 
 var comp_cylinder: Node3D = null
 var _comp_cyl_center := Vector3.ZERO
@@ -178,14 +179,14 @@ var comp_bezel_rect_left: ColorRect = null
 var comp_bezel_rect_right: ColorRect = null
 var comp_shader_mat_left: ShaderMaterial = null
 var comp_shader_mat_right: ShaderMaterial = null
-var use_comp_layer: bool = false
+var _comp.in_use_deprecated: bool = false
 var comp_stream_cursor: TextureRect = null
 var comp_stream_cursor_circle: ColorRect = null
 var comp_stream_cursor_left: TextureRect = null
 var comp_stream_cursor_circle_left: ColorRect = null
 var comp_stream_cursor_right: TextureRect = null
 var comp_stream_cursor_circle_right: ColorRect = null
-var comp_layer_available: bool = false
+var _comp.available_deprecated: bool = false
 var _screen_mesh_original_mat: Material = null
 
 var _log_lines: PackedStringArray = []
@@ -236,435 +237,34 @@ func _flush_log():
 		f.close()
 
 func _setup_comp_layer():
-	if not ClassDB.class_exists("OpenXRCompositionLayerCylinder"):
-		_log("[COMP] OpenXRCompositionLayerCylinder not available")
-		return
-
-	comp_cylinder = OpenXRCompositionLayerCylinder.new()
-	comp_cylinder.name = "CompCylinderLayer"
-	comp_cylinder.set_sort_order(1)
-	comp_cylinder.set_enable_hole_punch(false)
-	comp_cylinder.set_alpha_blend(false)
-	comp_cylinder.visible = false
-	xr_origin.add_child(comp_cylinder)
-	if comp_cylinder.is_natively_supported():
-		_log("[COMP] Cylinder layer natively supported")
-	else:
-		_log("[COMP] Cylinder layer NOT natively supported")
-
-	comp_viewport = SubViewport.new()
-	comp_viewport.name = "CompViewport"
-	comp_viewport.disable_3d = true
-	comp_viewport.transparent_bg = true
-	comp_viewport.size = Vector2i(1920, 1080)
-	_comp_base_size = Vector2i(1920, 1080)
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(comp_viewport)
-
-	comp_bezel_rect = ColorRect.new()
-	comp_bezel_rect.name = "CompBezelRect"
-	comp_bezel_rect.color = Color(0, 0, 0, 1)
-	comp_bezel_rect.anchors_preset = 15
-	comp_bezel_rect.anchor_right = 1.0
-	comp_bezel_rect.anchor_bottom = 1.0
-	comp_bezel_rect.grow_horizontal = 2
-	comp_bezel_rect.grow_vertical = 2
-	comp_viewport.add_child(comp_bezel_rect)
-
-	comp_yuv_rect = ColorRect.new()
-	comp_yuv_rect.name = "CompYuvRect"
-	comp_yuv_rect.anchors_preset = 15
-	comp_yuv_rect.anchor_right = 1.0
-	comp_yuv_rect.anchor_bottom = 1.0
-	comp_yuv_rect.grow_horizontal = 2
-	comp_yuv_rect.grow_vertical = 2
-	comp_shader_mat = ShaderMaterial.new()
-	comp_shader_mat.shader = load("res://src/shaders/yuv_display.gdshader")
-	comp_yuv_rect.material = comp_shader_mat
-	comp_bezel_rect.add_child(comp_yuv_rect)
-
-	comp_stream_cursor = TextureRect.new()
-	comp_stream_cursor.name = "CompStreamCursor"
-	comp_stream_cursor.texture = load("res://src/assets/mouse_pointer_01.png")
-	comp_stream_cursor.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	comp_stream_cursor.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	comp_stream_cursor.visible = false
-	comp_stream_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	comp_bezel_rect.add_child(comp_stream_cursor)
-
-	comp_stream_cursor_circle = ColorRect.new()
-	comp_stream_cursor_circle.name = "CompStreamCursorCircle"
-	comp_stream_cursor_circle.visible = false
-	comp_stream_cursor_circle.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var circle_mat_sq = ShaderMaterial.new()
-	circle_mat_sq.shader = preload("res://src/shaders/circle_cursor.gdshader")
-	comp_stream_cursor_circle.material = circle_mat_sq
-	comp_bezel_rect.add_child(comp_stream_cursor_circle)
-
-	comp_ui = OpenXRCompositionLayerQuad.new()
-	comp_ui.name = "CompUILayer"
-	comp_ui.set_sort_order(3)
-	comp_ui.set_enable_hole_punch(false)
-	comp_ui.set_alpha_blend(true)
-	comp_ui.set_quad_size(_ui_mesh_size)
-	comp_ui.visible = false
-	xr_origin.add_child(comp_ui)
-	comp_ui.set_layer_viewport(ui_viewport)
-	_log("[COMP] UI composition layer created")
-
-	comp_cursor = OpenXRCompositionLayerQuad.new()
-	comp_cursor.name = "CompCursorLayer"
-	comp_cursor.set_sort_order(4)
-	comp_cursor.set_enable_hole_punch(false)
-	comp_cursor.set_alpha_blend(true)
-	comp_cursor.set_quad_size(Vector2(0.04, 0.04))
-	comp_cursor.visible = false
-	xr_origin.add_child(comp_cursor)
-
-	comp_cursor_viewport = SubViewport.new()
-	comp_cursor_viewport.name = "CompCursorViewport"
-	comp_cursor_viewport.disable_3d = true
-	comp_cursor_viewport.transparent_bg = true
-	comp_cursor_viewport.size = Vector2i(40, 64)
-	comp_cursor_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(comp_cursor_viewport)
-
-	var pointer_tex = TextureRect.new()
-	pointer_tex.name = "PointerTexture"
-	pointer_tex.anchors_preset = 15
-	pointer_tex.anchor_right = 1.0
-	pointer_tex.anchor_bottom = 1.0
-	pointer_tex.expand_mode = 1
-	pointer_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	pointer_tex.texture = load("res://src/assets/mouse_pointer_01.png")
-	comp_cursor_viewport.add_child(pointer_tex)
-
-	var circle = ColorRect.new()
-	circle.name = "CircleTexture"
-	circle.anchors_preset = 15
-	circle.anchor_right = 1.0
-	circle.anchor_bottom = 1.0
-	var circle_mat = ShaderMaterial.new()
-	circle_mat.shader = preload("res://src/shaders/circle_cursor.gdshader")
-	circle.material = circle_mat
-	circle.visible = false
-	comp_cursor_viewport.add_child(circle)
-
-	comp_cursor.set_layer_viewport(comp_cursor_viewport)
-	_log("[COMP] Cursor composition layer created")
-
-	comp_kb = OpenXRCompositionLayerQuad.new()
-	comp_kb.name = "CompKBLayer"
-	comp_kb.set_sort_order(2)
-	comp_kb.set_enable_hole_punch(false)
-	comp_kb.set_alpha_blend(true)
-	comp_kb.set_quad_size(virtual_keyboard.mesh_size)
-	comp_kb.visible = false
-	xr_origin.add_child(comp_kb)
-	comp_kb.set_layer_viewport(virtual_keyboard.viewport)
-	_log("[COMP] Keyboard composition layer created")
-
-	comp_cylinder_left = OpenXRCompositionLayerCylinder.new()
-	comp_cylinder_left.name = "CompCylinderLeft"
-	comp_cylinder_left.set_sort_order(1)
-	comp_cylinder_left.set_enable_hole_punch(false)
-	comp_cylinder_left.set_alpha_blend(false)
-	comp_cylinder_left.set_eye_visibility(OpenXRCompositionLayer.EYE_VISIBILITY_LEFT)
-	comp_cylinder_left.visible = false
-	xr_origin.add_child(comp_cylinder_left)
-
-	comp_cylinder_right = OpenXRCompositionLayerCylinder.new()
-	comp_cylinder_right.name = "CompCylinderRight"
-	comp_cylinder_right.set_sort_order(1)
-	comp_cylinder_right.set_enable_hole_punch(false)
-	comp_cylinder_right.set_alpha_blend(false)
-	comp_cylinder_right.set_eye_visibility(OpenXRCompositionLayer.EYE_VISIBILITY_RIGHT)
-	comp_cylinder_right.visible = false
-	xr_origin.add_child(comp_cylinder_right)
-
-	comp_viewport_left = SubViewport.new()
-	comp_viewport_left.name = "CompViewportLeft"
-	comp_viewport_left.disable_3d = true
-	comp_viewport_left.transparent_bg = true
-	comp_viewport_left.size = Vector2i(1920, 1080)
-	comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	add_child(comp_viewport_left)
-
-	comp_bezel_rect_left = ColorRect.new()
-	comp_bezel_rect_left.name = "CompBezelRectLeft"
-	comp_bezel_rect_left.color = Color(0, 0, 0, 1)
-	comp_bezel_rect_left.anchors_preset = 15
-	comp_bezel_rect_left.anchor_right = 1.0
-	comp_bezel_rect_left.anchor_bottom = 1.0
-	comp_bezel_rect_left.grow_horizontal = 2
-	comp_bezel_rect_left.grow_vertical = 2
-	comp_viewport_left.add_child(comp_bezel_rect_left)
-
-	comp_yuv_rect_left = ColorRect.new()
-	comp_yuv_rect_left.name = "CompYuvRectLeft"
-	comp_yuv_rect_left.anchors_preset = 15
-	comp_yuv_rect_left.anchor_right = 1.0
-	comp_yuv_rect_left.anchor_bottom = 1.0
-	comp_yuv_rect_left.grow_horizontal = 2
-	comp_yuv_rect_left.grow_vertical = 2
-	comp_shader_mat_left = ShaderMaterial.new()
-	comp_shader_mat_left.shader = load("res://src/shaders/yuv_display.gdshader")
-	comp_shader_mat_left.set_shader_parameter("eye_index", 1)
-	comp_yuv_rect_left.material = comp_shader_mat_left
-	comp_bezel_rect_left.add_child(comp_yuv_rect_left)
-
-	comp_stream_cursor_left = TextureRect.new()
-	comp_stream_cursor_left.name = "CompStreamCursorLeft"
-	comp_stream_cursor_left.texture = load("res://src/assets/mouse_pointer_01.png")
-	comp_stream_cursor_left.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	comp_stream_cursor_left.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	comp_stream_cursor_left.visible = false
-	comp_stream_cursor_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	comp_bezel_rect_left.add_child(comp_stream_cursor_left)
-
-	comp_stream_cursor_circle_left = ColorRect.new()
-	comp_stream_cursor_circle_left.name = "CompStreamCursorCircleLeft"
-	comp_stream_cursor_circle_left.visible = false
-	comp_stream_cursor_circle_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var circle_mat_left = ShaderMaterial.new()
-	circle_mat_left.shader = preload("res://src/shaders/circle_cursor.gdshader")
-	comp_stream_cursor_circle_left.material = circle_mat_left
-	comp_bezel_rect_left.add_child(comp_stream_cursor_circle_left)
-
-	comp_viewport_right = SubViewport.new()
-	comp_viewport_right.name = "CompViewportRight"
-	comp_viewport_right.disable_3d = true
-	comp_viewport_right.transparent_bg = true
-	comp_viewport_right.size = Vector2i(1920, 1080)
-	comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	add_child(comp_viewport_right)
-
-	comp_bezel_rect_right = ColorRect.new()
-	comp_bezel_rect_right.name = "CompBezelRectRight"
-	comp_bezel_rect_right.color = Color(0, 0, 0, 1)
-	comp_bezel_rect_right.anchors_preset = 15
-	comp_bezel_rect_right.anchor_right = 1.0
-	comp_bezel_rect_right.anchor_bottom = 1.0
-	comp_bezel_rect_right.grow_horizontal = 2
-	comp_bezel_rect_right.grow_vertical = 2
-	comp_viewport_right.add_child(comp_bezel_rect_right)
-
-	comp_yuv_rect_right = ColorRect.new()
-	comp_yuv_rect_right.name = "CompYuvRectRight"
-	comp_yuv_rect_right.anchors_preset = 15
-	comp_yuv_rect_right.anchor_right = 1.0
-	comp_yuv_rect_right.anchor_bottom = 1.0
-	comp_yuv_rect_right.grow_horizontal = 2
-	comp_yuv_rect_right.grow_vertical = 2
-	comp_shader_mat_right = ShaderMaterial.new()
-	comp_shader_mat_right.shader = load("res://src/shaders/yuv_display.gdshader")
-	comp_shader_mat_right.set_shader_parameter("eye_index", 2)
-	comp_yuv_rect_right.material = comp_shader_mat_right
-	comp_bezel_rect_right.add_child(comp_yuv_rect_right)
-
-	comp_stream_cursor_right = TextureRect.new()
-	comp_stream_cursor_right.name = "CompStreamCursorRight"
-	comp_stream_cursor_right.texture = load("res://src/assets/mouse_pointer_01.png")
-	comp_stream_cursor_right.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	comp_stream_cursor_right.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	comp_stream_cursor_right.visible = false
-	comp_stream_cursor_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	comp_bezel_rect_right.add_child(comp_stream_cursor_right)
-
-	comp_stream_cursor_circle_right = ColorRect.new()
-	comp_stream_cursor_circle_right.name = "CompStreamCursorCircleRight"
-	comp_stream_cursor_circle_right.visible = false
-	comp_stream_cursor_circle_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var circle_mat_right = ShaderMaterial.new()
-	circle_mat_right.shader = preload("res://src/shaders/circle_cursor.gdshader")
-	comp_stream_cursor_circle_right.material = circle_mat_right
-	comp_bezel_rect_right.add_child(comp_stream_cursor_circle_right)
-
-	comp_cylinder_left.set_layer_viewport(comp_viewport_left)
-	comp_cylinder_right.set_layer_viewport(comp_viewport_right)
-	_log("[COMP] Stereo composition layers created")
-
-	comp_layer = comp_cylinder
-	comp_layer.set_layer_viewport(comp_viewport)
-	comp_layer_available = true
-	if comp_cylinder.is_natively_supported():
-		_log("[COMP] Composition layer cylinder natively supported")
-	else:
-		_log("[COMP] Composition layer cylinder NOT natively supported (using fallback mesh)")
-
-var _comp_base_size := Vector2i(1920, 1080)
+	comp = CompositionLayerManager.new(self)
+	comp.setup()
 
 func _update_comp_bezel():
-	if not comp_yuv_rect or not comp_bezel_rect:
-		return
-	var base_w = _comp_base_size.x
-	var base_h = _comp_base_size.y
-	if bezel_enabled and use_comp_layer:
-		var px = 8
-		comp_bezel_rect.color = Color(0, 0, 0, 1)
-		comp_bezel_rect.anchors_preset = 15
-		comp_bezel_rect.offset_left = 0
-		comp_bezel_rect.offset_top = 0
-		comp_bezel_rect.offset_right = 0
-		comp_bezel_rect.offset_bottom = 0
-		comp_yuv_rect.offset_left = px
-		comp_yuv_rect.offset_top = px
-		comp_yuv_rect.offset_right = -px
-		comp_yuv_rect.offset_bottom = -px
-		comp_yuv_rect.anchor_left = 0.0
-		comp_yuv_rect.anchor_top = 0.0
-		comp_yuv_rect.anchor_right = 1.0
-		comp_yuv_rect.anchor_bottom = 1.0
-		comp_yuv_rect.anchors_preset = 0
-		comp_viewport.size = Vector2i(base_w + px * 2, base_h + px * 2)
-		var bezel_x = _mesh_size.x * (1.0 + float(px * 2) / float(base_w))
-		var bezel_y = _mesh_size.y * (1.0 + float(px * 2) / float(base_h))
-		if comp_cylinder and comp_cylinder.visible:
-			comp_cylinder.set_aspect_ratio(bezel_x / bezel_y)
-		if comp_bezel_rect_left:
-			comp_bezel_rect_left.color = Color(0, 0, 0, 1)
-			comp_bezel_rect_left.anchors_preset = 15
-			comp_bezel_rect_left.offset_left = 0
-			comp_bezel_rect_left.offset_top = 0
-			comp_bezel_rect_left.offset_right = 0
-			comp_bezel_rect_left.offset_bottom = 0
-			comp_yuv_rect_left.offset_left = px
-			comp_yuv_rect_left.offset_top = px
-			comp_yuv_rect_left.offset_right = -px
-			comp_yuv_rect_left.offset_bottom = -px
-			comp_yuv_rect_left.anchor_left = 0.0
-			comp_yuv_rect_left.anchor_top = 0.0
-			comp_yuv_rect_left.anchor_right = 1.0
-			comp_yuv_rect_left.anchor_bottom = 1.0
-			comp_yuv_rect_left.anchors_preset = 0
-			comp_viewport_left.size = Vector2i(base_w + px * 2, base_h + px * 2)
-		if comp_bezel_rect_right:
-			comp_bezel_rect_right.color = Color(0, 0, 0, 1)
-			comp_bezel_rect_right.anchors_preset = 15
-			comp_bezel_rect_right.offset_left = 0
-			comp_bezel_rect_right.offset_top = 0
-			comp_bezel_rect_right.offset_right = 0
-			comp_bezel_rect_right.offset_bottom = 0
-			comp_yuv_rect_right.offset_left = px
-			comp_yuv_rect_right.offset_top = px
-			comp_yuv_rect_right.offset_right = -px
-			comp_yuv_rect_right.offset_bottom = -px
-			comp_yuv_rect_right.anchor_left = 0.0
-			comp_yuv_rect_right.anchor_top = 0.0
-			comp_yuv_rect_right.anchor_right = 1.0
-			comp_yuv_rect_right.anchor_bottom = 1.0
-			comp_yuv_rect_right.anchors_preset = 0
-			comp_viewport_right.size = Vector2i(base_w + px * 2, base_h + px * 2)
-		if comp_cylinder_left and comp_cylinder_left.visible:
-			comp_cylinder_left.set_aspect_ratio(bezel_x / bezel_y)
-		if comp_cylinder_right and comp_cylinder_right.visible:
-			comp_cylinder_right.set_aspect_ratio(bezel_x / bezel_y)
-	else:
-		comp_bezel_rect.color = Color(0, 0, 0, 0)
-		comp_bezel_rect.anchors_preset = 15
-		comp_bezel_rect.offset_left = 0
-		comp_bezel_rect.offset_top = 0
-		comp_bezel_rect.offset_right = 0
-		comp_bezel_rect.offset_bottom = 0
-		comp_yuv_rect.offset_left = 0
-		comp_yuv_rect.offset_top = 0
-		comp_yuv_rect.offset_right = 0
-		comp_yuv_rect.offset_bottom = 0
-		comp_yuv_rect.anchors_preset = 15
-		comp_viewport.size = Vector2i(base_w, base_h)
-		if comp_cylinder and comp_cylinder.visible:
-			comp_cylinder.set_aspect_ratio(_mesh_size.x / _mesh_size.y)
-		if comp_bezel_rect_left:
-			comp_bezel_rect_left.color = Color(0, 0, 0, 0)
-			comp_bezel_rect_left.anchors_preset = 15
-			comp_bezel_rect_left.offset_left = 0
-			comp_bezel_rect_left.offset_top = 0
-			comp_bezel_rect_left.offset_right = 0
-			comp_bezel_rect_left.offset_bottom = 0
-			comp_yuv_rect_left.offset_left = 0
-			comp_yuv_rect_left.offset_top = 0
-			comp_yuv_rect_left.offset_right = 0
-			comp_yuv_rect_left.offset_bottom = 0
-			comp_yuv_rect_left.anchors_preset = 15
-			comp_viewport_left.size = Vector2i(base_w, base_h)
-		if comp_bezel_rect_right:
-			comp_bezel_rect_right.color = Color(0, 0, 0, 0)
-			comp_bezel_rect_right.anchors_preset = 15
-			comp_bezel_rect_right.offset_left = 0
-			comp_bezel_rect_right.offset_top = 0
-			comp_bezel_rect_right.offset_right = 0
-			comp_bezel_rect_right.offset_bottom = 0
-			comp_yuv_rect_right.offset_left = 0
-			comp_yuv_rect_right.offset_top = 0
-			comp_yuv_rect_right.offset_right = 0
-			comp_yuv_rect_right.offset_bottom = 0
-			comp_yuv_rect_right.anchors_preset = 15
-			comp_viewport_right.size = Vector2i(base_w, base_h)
-		if comp_cylinder_left and comp_cylinder_left.visible:
-			comp_cylinder_left.set_aspect_ratio(_mesh_size.x / _mesh_size.y)
-		if comp_cylinder_right and comp_cylinder_right.visible:
-			comp_cylinder_right.set_aspect_ratio(_mesh_size.x / _mesh_size.y)
+	comp.update_bezel()
 
 func _update_cylinder_params():
-	if not comp_cylinder and not comp_cylinder_left:
-		return
-	var cam_to_screen = screen_mesh.global_position - xr_camera.global_position
-	var view_dist = cam_to_screen.length()
-	if view_dist < 0.5:
-		view_dist = 3.0
-	var radius = view_dist * 100.0
-	if curvature == 1:
-		radius = view_dist * 3.0
-	elif curvature == 2:
-		radius = view_dist * 2.0
-	var screen_forward = -screen_mesh.global_transform.basis.z
-	var central_angle = _mesh_size.x / radius
-	var aspect = _mesh_size.x / _mesh_size.y
-	_comp_cyl_radius = radius
-	_comp_cyl_central_angle = central_angle
-	_comp_cyl_center = screen_mesh.global_position - screen_forward * radius
-	if comp_cylinder and comp_cylinder.visible:
-		comp_cylinder.set_radius(radius)
-		comp_cylinder.set_central_angle(central_angle)
-		comp_cylinder.set_aspect_ratio(aspect)
-		comp_cylinder.global_position = screen_mesh.global_position - screen_forward * radius
-		comp_cylinder.global_rotation = screen_mesh.global_rotation
-	if comp_cylinder_left and comp_cylinder_left.visible:
-		comp_cylinder_left.set_radius(radius)
-		comp_cylinder_left.set_central_angle(central_angle)
-		comp_cylinder_left.set_aspect_ratio(aspect)
-		comp_cylinder_left.global_position = screen_mesh.global_position - screen_forward * radius
-		comp_cylinder_left.global_rotation = screen_mesh.global_rotation
-	if comp_cylinder_right and comp_cylinder_right.visible:
-		comp_cylinder_right.set_radius(radius)
-		comp_cylinder_right.set_central_angle(central_angle)
-		comp_cylinder_right.set_aspect_ratio(aspect)
-		comp_cylinder_right.global_position = screen_mesh.global_position - screen_forward * radius
-		comp_cylinder_right.global_rotation = screen_mesh.global_rotation
+	comp.update_cylinder_params()
 
 func _make_screen_transparent():
-	screen_mesh.visible = false
+	comp.make_screen_transparent()
 
 func _make_ui_transparent():
-	ui_panel_3d.visible = false
+	comp.make_ui_transparent()
 
 func _make_kb_transparent():
-	if not virtual_keyboard:
-		return
-	virtual_keyboard.mesh_instance.visible = false
+	comp.make_kb_transparent()
 
 func _restore_screen_material():
-	screen_mesh.visible = true
-	var screen_bar = get_node_or_null("%ScreenGrabBar")
-	if screen_bar:
-		screen_bar.visible = true
+	comp.restore_screen_material()
 
 func _restore_ui_material():
-	ui_panel_3d.visible = ui_visible
+	comp.restore_ui_material()
 
 func _restore_kb_material():
-	if virtual_keyboard:
-		virtual_keyboard.mesh_instance.visible = virtual_keyboard.visible
+	comp.restore_kb_material()
+
+var _comp_base_size := Vector2i(1920, 1080)
 
 func _get_steady_hit(raw: Vector3) -> Vector3:
 	if pointer_steady == 0 or not is_xr_active:
@@ -702,7 +302,7 @@ func _hit_point_to_uv(hit_point: Vector3) -> Vector2:
 	var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
 	if curvature == 0:
 		uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
-	elif use_comp_layer and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
+	elif comp.in_use and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
 		var cam_pos = xr_camera.global_position
 		var ray_dir = (hit_point - cam_pos).normalized()
 		var screen_right = screen_mesh.global_transform.basis.x
@@ -766,7 +366,7 @@ func _hide_all_stream_cursors():
 	_hide_stream_cursor(comp_stream_cursor_right, comp_stream_cursor_circle_right)
 
 func _update_cursor_layer():
-	if not comp_cursor or not use_comp_layer:
+	if not comp_cursor or not comp.in_use:
 		if comp_cursor:
 			comp_cursor.visible = false
 		_hide_all_stream_cursors()
@@ -862,15 +462,7 @@ func _update_cursor_layer():
 			_restore_kb_material()
 
 func set_comp_grab_bar_color(viewport: SubViewport, color: Color):
-	if not viewport:
-		return
-	var bar = viewport.find_child("CompGrabBar", true, false)
-	if bar and bar is PanelContainer:
-		var style = bar.get_theme_stylebox("panel")
-		if style and style is StyleBoxFlat:
-			style = style.duplicate()
-			style.bg_color = Color(1, 1, 1, color.a)
-			bar.add_theme_stylebox_override("panel", style)
+	CompositionLayerManager.set_grab_bar_color(viewport, color)
 
 func exit_app():
 	get_tree().quit()
@@ -894,66 +486,13 @@ func _on_connect_timeout():
 	stream_backend.stop_play_stream()
 
 func _bind_yuv_textures():
-	var mat = stream_backend.get_shader_material()
-	if not mat:
-		_log("[YUV] No shader material from stream backend, using SubViewport path")
-		var stream_tex = stream_viewport.get_texture()
-		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
-			screen_mesh.material_override.set_shader_parameter("main_texture", stream_tex)
-			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
-		_bind_comp_fallback_texture(stream_tex)
-		return
-	var tex_y = mat.get_shader_parameter("tex_y")
-	var tex_u = mat.get_shader_parameter("tex_u")
-	var tex_v = mat.get_shader_parameter("tex_v")
-	var is_nv12_rd = mat.get_shader_parameter("is_nv12_rd")
-	var is_semi_planar = mat.get_shader_parameter("is_semi_planar")
-	var cmt = mat.get_shader_parameter("color_matrix_type")
-	var cr = mat.get_shader_parameter("color_range")
-	if tex_y:
-		var yuv_mode_val = 0
-		if is_nv12_rd:
-			yuv_mode_val = 1
-		elif is_semi_planar:
-			yuv_mode_val = 2
-		else:
-			yuv_mode_val = 3
-		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
-			screen_mesh.material_override.set_shader_parameter("tex_y", tex_y)
-			screen_mesh.material_override.set_shader_parameter("tex_u", tex_u)
-			screen_mesh.material_override.set_shader_parameter("tex_v", tex_v)
-			screen_mesh.material_override.set_shader_parameter("color_matrix_type", cmt)
-			screen_mesh.material_override.set_shader_parameter("color_range", cr)
-			screen_mesh.material_override.set_shader_parameter("yuv_mode", yuv_mode_val)
-		_log("[YUV] Direct YUV binding: mode=%d nv12_rd=%s semi_planar=%s" % [yuv_mode_val, str(is_nv12_rd), str(is_semi_planar)])
-		_bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode_val, cmt, cr)
-	else:
-		var stream_tex = stream_viewport.get_texture()
-		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
-			screen_mesh.material_override.set_shader_parameter("main_texture", stream_tex)
-			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
-		_bind_comp_fallback_texture(stream_tex)
+	comp.bind_yuv_textures()
 
 func _bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode: int, cmt, cr):
-	var mats = [comp_shader_mat, comp_shader_mat_left, comp_shader_mat_right]
-	for mat in mats:
-		if not mat:
-			continue
-		mat.set_shader_parameter("tex_y", tex_y)
-		mat.set_shader_parameter("tex_u", tex_u)
-		mat.set_shader_parameter("tex_v", tex_v)
-		mat.set_shader_parameter("yuv_mode", yuv_mode)
-		mat.set_shader_parameter("color_matrix_type", cmt)
-		mat.set_shader_parameter("color_range", cr)
-	_log("[COMP] YUV textures bound to composition layer shader (mode=%d)" % yuv_mode)
+	comp.bind_comp_yuv_textures(tex_y, tex_u, tex_v, yuv_mode, cmt, cr)
 
 func _bind_comp_fallback_texture(stream_tex):
-	var mats = [comp_shader_mat, comp_shader_mat_left, comp_shader_mat_right]
-	for mat in mats:
-		if not mat:
-			continue
-		mat.set_shader_parameter("main_texture", stream_tex)
-		mat.set_shader_parameter("yuv_mode", 0)
+	comp.bind_fallback_texture(stream_tex)
 
 func _on_stream_started():
 	var was_restarting = _restarting_stream
@@ -967,7 +506,7 @@ func _on_stream_started():
 	welcome_screen.reset_connect_button()
 	if _ui_disconnect_btn: _ui_disconnect_btn.visible = true
 	_log("[STREAM] Connection started!")
-	if not use_comp_layer:
+	if not comp.in_use:
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	stream_manager.bind_texture()
@@ -984,99 +523,16 @@ func _on_stream_started():
 	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
 
 func _switch_to_comp_layer():
-	if not comp_layer_available:
-		use_comp_layer = false
-		_log("[COMP] Not available, using mesh rendering")
-		return
-	var stereo = settings_controller.get_stereo_mode() if settings_controller else 0
-	if stereo > 0:
-		_switch_to_stereo_comp_layer()
-		return
-	use_comp_layer = true
-	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	if comp_cylinder_left: comp_cylinder_left.visible = false
-	if comp_cylinder_right: comp_cylinder_right.visible = false
-	if comp_viewport_left: comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	if comp_viewport_right: comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	if comp_cylinder:
-		comp_layer = comp_cylinder
-		comp_layer.set_layer_viewport(comp_viewport)
-		comp_layer.visible = true
-		_update_cylinder_params()
-		_log("[COMP] Switched to composition layer (cylinder, curv=%d)" % curvature)
-	else:
-		comp_layer.set_layer_viewport(comp_viewport)
-		comp_layer.visible = true
-		_log("[COMP] Switched to composition layer (quad fallback)")
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	comp_shader_mat.set_shader_parameter("stereo_mode", 0)
-	settings_controller.apply_filter()
-	_make_screen_transparent()
-	bezel_mesh.visible = false
-	_update_comp_bezel()
+	comp.switch_to_comp_layer()
 
 func _switch_to_stereo_comp_layer():
-	if not comp_layer_available:
-		use_comp_layer = false
-		_log("[COMP] Not available, cannot use stereo comp layer")
-		return
-	use_comp_layer = true
-	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	if comp_cylinder: comp_cylinder.visible = false
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	var stereo = settings_controller.get_stereo_mode()
-	comp_cylinder_left.visible = true
-	comp_cylinder_right.visible = true
-	comp_cylinder_left.set_layer_viewport(comp_viewport_left)
-	comp_cylinder_right.set_layer_viewport(comp_viewport_right)
-	comp_shader_mat_left.set_shader_parameter("stereo_mode", stereo)
-	comp_shader_mat_left.set_shader_parameter("eye_index", 1)
-	comp_shader_mat_right.set_shader_parameter("stereo_mode", stereo)
-	comp_shader_mat_right.set_shader_parameter("eye_index", 2)
-	comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_make_screen_transparent()
-	bezel_mesh.visible = false
-	_update_cylinder_params()
-	_update_comp_bezel()
-	if is_streaming:
-		_bind_yuv_textures()
-	_log("[COMP] Switched to stereo composition layer (mode=%d)" % stereo)
+	comp.switch_to_stereo_comp_layer()
 
 func _switch_to_mesh_rendering():
-	use_comp_layer = false
-	stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if is_streaming else SubViewport.UPDATE_DISABLED
-	if comp_cylinder: comp_cylinder.visible = false
-	if comp_cylinder_left: comp_cylinder_left.visible = false
-	if comp_cylinder_right: comp_cylinder_right.visible = false
-	if comp_ui: comp_ui.visible = false
-	if comp_kb: comp_kb.visible = false
-	if comp_cursor: comp_cursor.visible = false
-	if comp_viewport:
-		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	if comp_viewport_left:
-		comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	if comp_viewport_right:
-		comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	_restore_screen_material()
-	_restore_ui_material()
-	_restore_kb_material()
-	bezel_mesh.visible = bezel_enabled
-	if is_streaming:
-		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-		var mat = screen_mesh.material_override
-		_log("[MESH] material type=%s" % str(mat.get_class()) if mat else "[MESH] material is null")
-		mat.set_shader_parameter("main_texture", stream_viewport.get_texture())
-		mat.set_shader_parameter("yuv_mode", 0)
-		_bind_yuv_textures()
-		var mode = settings_controller.get_stereo_mode()
-		mat.set_shader_parameter("stereo_mode", mode)
-		mat.set_shader_parameter("filter_mode", smooth_mode)
-		mat.set_shader_parameter("sharpen", float(sharpen_mode) * 0.016)
-		_log("[MESH] stereo=%d yuv_mode=%d filter=%d sharpen=%.3f" % [mode, mat.get_shader_parameter("yuv_mode"), smooth_mode, float(sharpen_mode) * 0.016])
+	comp.switch_to_mesh_rendering()
 
 func _update_comp_layer_size():
-	_update_cylinder_params()
+	comp.update_layer_size()
 
 func _on_stream_terminated(msg: String, err_code: int = 0):
 	_log("[NF] _on_stream_terminated: auto=" + str(_auto_connect) + " restarting=" + str(_restarting_stream) + " reconnecting=" + str(_reconnecting) + " msg=" + str(msg) + " err=" + str(err_code))
@@ -1089,7 +545,7 @@ func _on_stream_terminated(msg: String, err_code: int = 0):
 		ui_controller.update_codec_btn()
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		_clear_comp_yuv_textures()
-		if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
+		if not comp.in_use and screen_mesh.material_override is ShaderMaterial:
 			screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
 			screen_mesh.material_override.set_shader_parameter("tex_y", null)
 			screen_mesh.material_override.set_shader_parameter("tex_u", null)
@@ -1122,18 +578,18 @@ func _full_disconnect_cleanup(status_msg: String):
 	if comp_shader_mat_right:
 		comp_shader_mat_right.set_shader_parameter("main_texture", welcome_viewport.get_texture())
 		comp_shader_mat_right.set_shader_parameter("yuv_mode", 0)
-	if not use_comp_layer and screen_mesh.material_override is ShaderMaterial:
+	if not comp.in_use and screen_mesh.material_override is ShaderMaterial:
 		screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
 		screen_mesh.material_override.set_shader_parameter("tex_y", null)
 		screen_mesh.material_override.set_shader_parameter("tex_u", null)
 		screen_mesh.material_override.set_shader_parameter("tex_v", null)
 	stream_manager.teardown_v2_yuv_rect()
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	if comp_layer_available:
+	if comp.available:
 		_switch_to_comp_layer()
 		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	else:
-		if not use_comp_layer:
+		if not comp.in_use:
 			screen_mesh.material_override.set_shader_parameter("main_texture", welcome_viewport.get_texture())
 		_switch_to_mesh_rendering()
 	if mouse_captured_by_stream:
@@ -1155,17 +611,7 @@ func _full_disconnect_cleanup(status_msg: String):
 	stream_manager.resize_stream_viewport(1920, 1080)
 
 func _clear_comp_yuv_textures():
-	var mats = [comp_shader_mat, comp_shader_mat_left, comp_shader_mat_right]
-	for mat in mats:
-		if not mat:
-			continue
-		mat.set_shader_parameter("tex_y", null)
-		mat.set_shader_parameter("tex_u", null)
-		mat.set_shader_parameter("tex_v", null)
-		mat.set_shader_parameter("yuv_mode", 0)
-		mat.set_shader_parameter("main_texture", null)
-		mat.set_shader_parameter("stereo_mode", 0)
-		mat.set_shader_parameter("depth_texture", null)
+	comp.clear_yuv_textures()
 
 func _ready():
 	if OS.get_name() == "Android":
@@ -1351,16 +797,7 @@ func _ready():
 
 	_screen_mesh_original_mat = screen_mesh.material_override
 	_setup_comp_layer()
-	if comp_layer_available:
-		comp_shader_mat.set_shader_parameter("main_texture", welcome_viewport.get_texture())
-		comp_shader_mat.set_shader_parameter("yuv_mode", 0)
-		if comp_shader_mat_left:
-			comp_shader_mat_left.set_shader_parameter("main_texture", welcome_viewport.get_texture())
-			comp_shader_mat_left.set_shader_parameter("yuv_mode", 0)
-		if comp_shader_mat_right:
-			comp_shader_mat_right.set_shader_parameter("main_texture", welcome_viewport.get_texture())
-			comp_shader_mat_right.set_shader_parameter("yuv_mode", 0)
-	comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	comp.connect_welcome_texture()
 
 	await get_tree().create_timer(0.5).timeout
 	_reposition_screen_and_ui()
@@ -1370,7 +807,7 @@ func _ready():
 
 	state_manager.load_state()
 
-	if comp_layer_available:
+	if comp.available:
 		_switch_to_comp_layer()
 
 	if passthrough_mode > 0:
@@ -1544,7 +981,7 @@ func _process(delta):
 
 	if depth_estimator:
 		depth_estimator.process(delta)
-		if depth_estimator.depth_texture and ai_3d_mode > 0 and use_comp_layer:
+		if depth_estimator.depth_texture and ai_3d_mode > 0 and comp.in_use:
 			var dt = depth_estimator.depth_texture
 			if comp_shader_mat_left and not comp_shader_mat_left.get_shader_parameter("depth_texture"):
 				comp_shader_mat_left.set_shader_parameter("depth_texture", dt)
@@ -1552,7 +989,7 @@ func _process(delta):
 				comp_shader_mat_right.set_shader_parameter("depth_texture", dt)
 
 	if is_streaming:
-		if use_comp_layer:
+		if comp.in_use:
 			var cur_filter = smooth_mode
 			var cur_sharpen = float(sharpen_mode) * 0.5
 			var cur_blur_scale = float(host_resolution.x) / float(_xr_render_width) if _xr_render_width > 0 else 1.0
@@ -1606,7 +1043,7 @@ func _toggle_ui():
 			comp_ui.visible = true
 			comp_ui.global_position = ui_panel_3d.global_position
 			comp_ui.global_rotation = ui_panel_3d.global_rotation
-		if use_comp_layer:
+		if comp.in_use:
 			_make_ui_transparent()
 		else:
 			var ui_tex = ui_viewport.get_texture()

@@ -168,7 +168,7 @@ func resize_stream_viewport(w: int, h: int):
 	if main.comp_viewport_right:
 		main.comp_viewport_right.size = Vector2i(w, h)
 	main._comp_base_size = Vector2i(w, h)
-	main._update_comp_bezel()
+	main.comp.update_bezel()
 	if main.comp_layer and main.comp_layer is OpenXRCompositionLayerQuad:
 		main.comp_layer.set_quad_size(main._mesh_size)
 	main.screen_manager.resize_screen_to_aspect(w, h)
@@ -256,7 +256,7 @@ func browse_mdns() -> Array:
 
 func bind_texture():
 	var stream_tex
-	if main.use_comp_layer and main.comp_viewport:
+	if main.comp.in_use and main.comp_viewport:
 		stream_tex = main.comp_viewport.get_texture()
 	else:
 		stream_tex = main.stream_viewport.get_texture()
@@ -312,7 +312,7 @@ func update_stats():
 	if not _v2_yuv_rect:
 		_setup_v2_yuv_rect()
 	_update_yuv_shader_params()
-	main._bind_yuv_textures()  # Re-bind after compute pipeline may have updated tex_y
+	main.comp.bind_yuv_textures()  # Re-bind after compute pipeline may have updated tex_y
 	var new_frame = _b().consume_new_frame()
 	var vw = _b().get_video_width()
 	var vh = _b().get_video_height()

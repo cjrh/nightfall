@@ -149,9 +149,9 @@ func update_bezel_size():
 func toggle_bezel():
 	main.bezel_enabled = not main.bezel_enabled
 	if main.bezel_mesh:
-		main.bezel_mesh.visible = main.bezel_enabled if not main.use_comp_layer else false
+		main.bezel_mesh.visible = main.bezel_enabled if not main.comp.in_use else false
 	main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
-	main._update_comp_bezel()
+	main.comp.update_bezel()
 	main.state_manager.save_state()
 
 func resize_screen_to_aspect(stream_w: int, stream_h: int):
@@ -176,8 +176,8 @@ func resize_screen_to_aspect(stream_w: int, stream_h: int):
 func cycle_curvature():
 	main.curvature = (main.curvature + 1) % 3
 	apply_curvature()
-	if main.use_comp_layer:
-		main._switch_to_comp_layer()
+	if main.comp.in_use:
+		main.comp.switch_to_comp_layer()
 	main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[main.curvature])
 	main.state_manager.save_state()
 

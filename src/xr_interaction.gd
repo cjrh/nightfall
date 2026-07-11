@@ -151,8 +151,6 @@ func handle_pointer_interaction():
 			main.was_right_clicking = false
 
 	main.get_node("%ScreenGrabBar").visible = true
-	if main.virtual_keyboard and main.virtual_keyboard.grab_bar:
-		main.virtual_keyboard.grab_bar.visible = main.virtual_keyboard.visible
 	for ch in main.corner_handles:
 		ch.visible = true
 
@@ -473,9 +471,9 @@ func handle_grab():
 
 	if main.grabbed_node == main.screen_mesh:
 		if main.comp_cylinder and main.comp_cylinder.visible:
-			main._update_cylinder_params()
+			main.comp.update_cylinder_params()
 		if main.comp_cylinder_left and main.comp_cylinder_left.visible:
-			main._update_cylinder_params()
+			main.comp.update_cylinder_params()
 
 	if main.is_xr_active and main.grab_start_hand_basis != Basis():
 		var hand_fwd = -active_raycast.global_transform.basis.z
@@ -492,9 +490,9 @@ func handle_grab():
 
 	if main.grabbed_node == main.screen_mesh:
 		if main.comp_cylinder and main.comp_cylinder.visible:
-			main._update_cylinder_params()
+			main.comp.update_cylinder_params()
 		if main.comp_cylinder_left and main.comp_cylinder_left.visible:
-			main._update_cylinder_params()
+			main.comp.update_cylinder_params()
 
 	var still_clicking = _is_now_clicking()
 	if not still_clicking:
@@ -574,7 +572,7 @@ func handle_corner_resize():
 
 	main.screen_manager.update_corner_positions()
 	main.screen_manager.update_bezel_size()
-	main._update_comp_layer_size()
+	main.comp.update_layer_size()
 
 	var still_clicking = _is_now_clicking()
 	if not still_clicking:

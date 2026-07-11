@@ -1,13 +1,6 @@
 class_name VirtualKeyboard
-extends Node3D
+extends VRPanelBase
 
-var main: Node3D
-var viewport: SubViewport
-var mesh_instance: MeshInstance3D
-var area: Area3D
-var collision_shape: CollisionShape3D
-var grab_bar: MeshInstance3D = null
-var grab_bar_area: Area3D = null
 var mesh_size := Vector2(1.04, 0.3)
 var viewport_size := Vector2i(2080, 600)
 var _kb_width := 1640
@@ -41,16 +34,8 @@ var _KEY_ROWS = [
 	[{"k": KEY_CTRL, "l": "Ctrl", "w": 1.5, "mod": "ctrl"}, {"k": KEY_ALT, "l": "Alt", "w": 1.5, "mod": "alt"}, {"k": KEY_META, "l": "Super", "w": 1.5}, {"k": KEY_SPACE, "l": "Space", "w": 6.0}, {"k": KEY_META, "l": "Super", "w": 1.5}, {"k": KEY_ALT, "l": "Alt", "w": 1.5, "mod": "alt"}, {"k": KEY_CTRL, "l": "Ctrl", "w": 1.5, "mod": "ctrl"}],
 ]
 
-func _init(owner: Node3D):
-	main = owner
-
 func build():
-	viewport = SubViewport.new()
-	viewport.name = "KBViewport"
-	viewport.size = viewport_size
-	viewport.transparent_bg = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(viewport)
+	_setup_viewport("KBViewport")
 
 	_kb_root = Control.new()
 	_kb_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -69,73 +54,10 @@ func build():
 	_build_keys()
 	_build_trackpad()
 
-	var bottom_box = HBoxContainer.new()
-	bottom_box.anchor_left = 0.0
-	bottom_box.anchor_right = 1.0
-	bottom_box.anchor_top = 1.0
-	bottom_box.anchor_bottom = 1.0
-	bottom_box.offset_top = -79
-	bottom_box.offset_bottom = -37
-	bottom_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_box.add_theme_constant_override("separation", 0)
-	viewport.add_child(bottom_box)
-
-	var left_spacer = Control.new()
-	left_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_box.add_child(left_spacer)
-
-	var grab_bar = PanelContainer.new()
-	grab_bar.name = "CompGrabBar"
-	grab_bar.custom_minimum_size = Vector2(0, 38)
-	grab_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grab_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var grab_style = StyleBoxFlat.new()
-	grab_style.bg_color = Color(1, 1, 1, 0.08)
-	grab_style.set_corner_radius_all(19)
-	grab_bar.add_theme_stylebox_override("panel", grab_style)
-	bottom_box.add_child(grab_bar)
-
-	var right_spacer = Control.new()
-	right_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_box.add_child(right_spacer)
-
-	var quad = QuadMesh.new()
-	quad.size = mesh_size
-	quad.flip_faces = true
-	mesh_instance = MeshInstance3D.new()
-	mesh_instance.name = "KBPanel"
-	mesh_instance.mesh = quad
-	var tex_mat = StandardMaterial3D.new()
-	tex_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	tex_mat.albedo_color = Color(1, 1, 1, 0.85)
-	tex_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	tex_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	tex_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	tex_mat.albedo_texture = viewport.get_texture()
-	mesh_instance.set_surface_override_material(0, tex_mat)
-	mesh_instance.extra_cull_margin = 10.0
-	add_child(mesh_instance)
-
-	area = Area3D.new()
-	area.name = "Area3D"
-	area.collision_layer = 2
-	mesh_instance.add_child(area)
-	var shape = BoxShape3D.new()
-	shape.size = Vector3(mesh_size.x, mesh_size.y, 0.02)
-	collision_shape = CollisionShape3D.new()
-	collision_shape.shape = shape
-	collision_shape.position = Vector3(0, 0, 0.01)
-	area.add_child(collision_shape)
-
-	grab_bar = null
-
-	visible = false
-	if area:
-		area.process_mode = Node.PROCESS_MODE_DISABLED
-		area.monitorable = false
-		area.monitoring = false
+	_setup_grab_bar(viewport, 38, -79, -37, 19)
+	_setup_mesh("KBPanel")
+	_setup_collision()
+	_hide_initially()
 
 func _build_keys():
 	var key_h = 72
@@ -323,16 +245,9 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 		_held_keys.clear()
 
 func _set_tp_active_visual(active: bool):
-	if not _tp_border:
-		return
-	var style = _tp_border.get_theme_stylebox("panel")
-	if style and style is StyleBoxFlat:
-		style = style.duplicate()
-		if active:
-			style.border_color = Color(0.3, 0.6, 1.0, 0.9)
-		else:
-			style.border_color = Color(0.25, 0.25, 0.35, 0.4)
-		_tp_border.add_theme_stylebox_override("panel", style)
+	var base_color = Color(0.25, 0.25, 0.35, 0.4)
+	var active_color = Color(0.3, 0.6, 1.0, 0.9)
+	_apply_border_active(_tp_border, active, base_color, active_color)
 	_update_tp_hint()
 
 func _update_tp_hint():
@@ -489,43 +404,15 @@ func _apply_modifier_visuals():
 		var btn = kd["btn"]
 		btn.text = shift_label if shifted else kd["l"]
 
-var _saved_offset: Vector3 = Vector3.ZERO
-var _saved_rot_y: float = 0.0
-var _saved_rot_x: float = 0.0
-var _has_saved_offset: bool = false
+func _place_default():
+	var cam_pos = main.xr_camera.global_position
+	var cam_fwd = -main.xr_camera.global_transform.basis.z
+	var cam_up = main.xr_camera.global_transform.basis.y
+	global_position = cam_pos + cam_fwd * 0.9 - cam_up * 0.4
+	var to_cam = (cam_pos - global_position).normalized()
+	rotation.y = atan2(to_cam.x, to_cam.z)
+	rotation.x = -PI / 4.0
 
-func toggle():
-	var new_vis = not visible
-	if new_vis:
-		if _has_saved_offset:
-			global_position = main.screen_mesh.global_position + main.screen_mesh.global_transform.basis * _saved_offset
-			rotation.y = main.screen_mesh.global_rotation.y + _saved_rot_y
-			rotation.x = _saved_rot_x
-		else:
-			var cam_pos = main.xr_camera.global_position
-			var cam_fwd = -main.xr_camera.global_transform.basis.z
-			var cam_up = main.xr_camera.global_transform.basis.y
-			global_position = cam_pos + cam_fwd * 0.9 - cam_up * 0.4
-			var to_cam = (cam_pos - global_position).normalized()
-			rotation.y = atan2(to_cam.x, to_cam.z)
-			rotation.x = -PI / 4.0
-			_has_saved_offset = true
-		_save_offset()
-	visible = new_vis
-	if area:
-		area.process_mode = Node.PROCESS_MODE_INHERIT if new_vis else Node.PROCESS_MODE_DISABLED
-		area.monitorable = new_vis
-		area.monitoring = new_vis
-	if not new_vis:
-		_save_offset()
-		_deactivate_trackpad()
-
-func reset_position():
-	_has_saved_offset = false
-
-func _save_offset():
-	var scr_basis = main.screen_mesh.global_transform.basis.inverse()
-	_saved_offset = scr_basis * (global_position - main.screen_mesh.global_position)
-	_saved_rot_y = rotation.y - main.screen_mesh.global_rotation.y
-	_saved_rot_x = rotation.x
-	_has_saved_offset = true
+func _on_hide():
+	_save_offset()
+	_deactivate_trackpad()
