@@ -23,12 +23,16 @@ func get_stereo_mode() -> int:
 	else:
 		return 4
 
+func _save_setting(btn: Button, label: String):
+	if btn:
+		main.ui_controller.update_option_btn(btn, label)
+	main.state_manager.save_state()
+
 func cycle_sbs_mode():
 	main.sbs_mode = (main.sbs_mode + 1) % 3
-	main.ui_controller.update_option_btn(main._ui_sbs_btn, sbs_labels[main.sbs_mode])
+	_save_setting(main._ui_sbs_btn, sbs_labels[main.sbs_mode])
 	main.ui_controller.update_3d_btn_state()
 	apply_stereo()
-	main.state_manager.save_state()
 
 func cycle_ai_3d_mode():
 	if OS.get_name() != "Android":
@@ -36,9 +40,8 @@ func cycle_ai_3d_mode():
 	if main.sbs_mode > 0:
 		return
 	main.ai_3d_mode = (main.ai_3d_mode + 1) % 2
-	main.ui_controller.update_option_btn(main._ui_3d_btn, ai_3d_labels[main.ai_3d_mode])
+	_save_setting(main._ui_3d_btn, ai_3d_labels[main.ai_3d_mode])
 	apply_stereo()
-	main.state_manager.save_state()
 
 func apply_stereo():
 	var mode = get_stereo_mode()
@@ -93,8 +96,7 @@ func toggle_passthrough():
 			if bg:
 				bg.visible = true
 				bg.emitting = true
-	main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[main.passthrough_mode])
-	main.state_manager.save_state()
+	_save_setting(main._ui_pt_btn, main.passthrough_labels[main.passthrough_mode])
 
 func _hide_all_backgrounds():
 	for name in main.bg_names:
@@ -105,20 +107,17 @@ func _hide_all_backgrounds():
 
 func cycle_smooth_mode():
 	main.smooth_mode = (main.smooth_mode + 1) % main.smooth_labels.size()
-	main.ui_controller.update_option_btn(main._ui_render_btn, main.smooth_labels[main.smooth_mode])
+	_save_setting(main._ui_render_btn, main.smooth_labels[main.smooth_mode])
 	apply_filter()
-	main.state_manager.save_state()
 
 func cycle_cursor_mode():
 	main.cursor_mode = (main.cursor_mode + 1) % main.cursor_labels.size()
-	main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[main.cursor_mode])
-	main.state_manager.save_state()
+	_save_setting(main._ui_cursor_btn, main.cursor_labels[main.cursor_mode])
 
 func cycle_steady():
 	main.pointer_steady = (main.pointer_steady + 1) % main.pointer_steady_labels.size()
 	main._steady_active = false
-	main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[main.pointer_steady])
-	main.state_manager.save_state()
+	_save_setting(main._ui_steady_btn, main.pointer_steady_labels[main.pointer_steady])
 
 func is_codec_available(idx: int) -> bool:
 	var client_ok = false
@@ -170,23 +169,20 @@ func fallback_codec():
 
 func cycle_sharpen_mode():
 	main.sharpen_mode = (main.sharpen_mode + 1) % main.sharpen_labels.size()
-	main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[main.sharpen_mode])
+	_save_setting(main._ui_sharpen_btn, main.sharpen_labels[main.sharpen_mode])
 	apply_filter()
-	main.state_manager.save_state()
 
 func cycle_auto_reconnect():
 	main.auto_reconnect_enabled = not main.auto_reconnect_enabled
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
-	main.ui_controller.update_option_btn(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
-	main.state_manager.save_state()
+	_save_setting(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
 
 func cycle_idle_timeout():
 	var idx = idle_values.find(main.idle_timeout_min)
 	idx = (idx + 1) % idle_values.size()
 	main.idle_timeout_min = idle_values[idx]
-	main.ui_controller.update_option_btn(main._ui_idle_btn, idle_labels[idx])
-	main.state_manager.save_state()
+	_save_setting(main._ui_idle_btn, idle_labels[idx])
 
 func apply_filter():
 	if not main.is_xr_active:
@@ -240,8 +236,7 @@ func cycle_fps():
 	var rates = [30, 60, 72, 90, 120]
 	var idx = rates.find(main.stream_fps)
 	main.stream_fps = rates[(idx + 1) % rates.size()]
-	main.ui_controller.update_option_btn(main._ui_fps_btn, "%d" % main.stream_fps)
-	main.state_manager.save_state()
+	_save_setting(main._ui_fps_btn, "%d" % main.stream_fps)
 	_schedule_stream_restart()
 
 func cycle_resolution():
@@ -250,11 +245,10 @@ func cycle_resolution():
 		main.resolution_idx = -1
 	if main.resolution_idx == -1:
 		main.host_resolution = Vector2i(1920, 1080)
-		main.ui_controller.update_option_btn(main._ui_res_btn, "Auto")
+		_save_setting(main._ui_res_btn, "Auto")
 	else:
 		main.host_resolution = main.resolutions[main.resolution_idx]
-		main.ui_controller.update_option_btn(main._ui_res_btn, main.resolution_labels[main.resolution_idx])
-	main.state_manager.save_state()
+		_save_setting(main._ui_res_btn, main.resolution_labels[main.resolution_idx])
 	_schedule_stream_restart()
 
 func cycle_bitrate():
@@ -262,8 +256,7 @@ func cycle_bitrate():
 	if main.bitrate_idx >= main.bitrate_labels.size():
 		main.bitrate_idx = -1
 	var label = main.bitrate_labels[main.bitrate_idx + 1] if main.bitrate_idx >= 0 else "Auto"
-	main.ui_controller.update_option_btn(main._ui_bitrate_btn, label)
-	main.state_manager.save_state()
+	_save_setting(main._ui_bitrate_btn, label)
 	_schedule_stream_restart()
 
 func cycle_double_h():

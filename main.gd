@@ -615,15 +615,58 @@ func _clear_comp_yuv_textures():
 	comp.clear_yuv_textures()
 
 func _ready():
+	_log("=== Nightfall started ===")
+	Engine.max_fps = 0
+
 	if OS.get_name() == "Android":
 		OS.set_environment("CURL_CA_BUNDLE", "/system/etc/security/cacerts/")
 		OS.set_environment("SSL_CERT_FILE", "/system/etc/security/cacerts/")
 	else:
 		OS.set_environment("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
 		OS.set_environment("SSL_CERT_FILE", "/etc/ssl/certs/")
-	_log("=== Nightfall started ===")
-	Engine.max_fps = 0
 
+	_init_modules()
+	_init_android_setup()
+	_init_ui()
+	_init_stream_backend()
+
+	var interface = XRServer.find_interface("OpenXR")
+	if not interface or not interface.is_initialized():
+		_log("[XR] OpenXR not available - cannot run without VR runtime")
+		if not Engine.is_editor_hint():
+			get_tree().quit()
+		return
+
+	if Engine.is_editor_hint():
+		get_viewport().use_xr = false
+		if interface:
+			interface.uninitialize()
+		return
+
+	_init_xr(interface)
+	_init_backgrounds_and_comp_layer()
+	await get_tree().create_timer(0.5).timeout
+	_reposition_screen_and_ui()
+	screen_mesh.extra_cull_margin = 10.0
+	ui_panel_3d.extra_cull_margin = 10.0
+	_init_post_xr()
+	_init_textures_and_ui()
+
+	if _auto_connect:
+		_try_auto_connect()
+
+	Input.joy_connection_changed.connect(func(device, connected):
+		_on_joy_changed(device, connected)
+	)
+
+	if right_hand:
+		right_hand.pose = "aim"
+	if left_hand:
+		left_hand.pose = "aim"
+
+	_post_ready_check.call_deferred()
+
+func _init_modules():
 	stream_manager = StreamManager.new(self)
 	xr_interaction = XRInteraction.new(self)
 	input_handler = InputHandler.new(self)
@@ -638,11 +681,28 @@ func _ready():
 	controller_mapper = ControllerMapper.new(self)
 	add_child(controller_mapper)
 
+func _init_android_setup():
 	if OS.get_name() == "Android":
 		depth_estimator.setup()
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		_load_controller_models()
 	sbs_mode = clampi(sbs_mode, 0, 2)
 	ai_3d_mode = clampi(ai_3d_mode, 0, 1)
 
+	if right_hand and left_hand:
+		var right_ray = right_hand.get_node_or_null("HandRayCast")
+		if right_ray:
+			left_hand_raycast = right_ray.duplicate()
+			left_hand_raycast.name = "LeftHandRayCast"
+			left_hand.add_child(left_hand_raycast)
+
+	if has_node("%Laser"):
+		get_node("%Laser").material_override.render_priority = 100
+
+	right_hand_visual = _create_hand_visualizer(false)
+	left_hand_visual = _create_hand_visualizer(true)
+
+func _init_ui():
 	virtual_keyboard = VirtualKeyboard.new(self)
 	add_child(virtual_keyboard)
 	virtual_keyboard.build()
@@ -653,31 +713,13 @@ func _ready():
 	screen_manager.create_bezel()
 	_create_contact_dot()
 
-	if OS.get_name() == "Android":
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-
-	if OS.get_name() == "Android":
-		_load_controller_models()
-
-	if right_hand and left_hand:
-		var right_ray = right_hand.get_node_or_null("HandRayCast")
-		if right_ray:
-			left_hand_raycast = right_ray.duplicate()
-			left_hand_raycast.name = "LeftHandRayCast"
-			left_hand.add_child(left_hand_raycast)
-	
-	if has_node("%Laser"):
-		get_node("%Laser").material_override.render_priority = 100
-	
-	right_hand_visual = _create_hand_visualizer(false)
-	left_hand_visual = _create_hand_visualizer(true)
-
 	ui_controller.build_ui()
 	welcome_screen.build_welcome_ui()
 
 	%IPInput.gui_input.connect(func(e): ui_controller.on_ipinput_gui_input(e))
 	ui_controller.setup_numpad()
 
+func _init_stream_backend():
 	if config_mgr and comp_mgr:
 		comp_mgr.set_config_manager(config_mgr)
 	if not ClassDB.class_exists("NightfallStream"):
@@ -742,19 +784,7 @@ func _ready():
 			stats_network_events += 1
 	)
 
-	var interface = XRServer.find_interface("OpenXR")
-	if not interface or not interface.is_initialized():
-		_log("[XR] OpenXR not available - cannot run without VR runtime")
-		if not Engine.is_editor_hint():
-			get_tree().quit()
-		return
-
-	if Engine.is_editor_hint():
-		get_viewport().use_xr = false
-		if interface:
-			interface.uninitialize()
-		return
-
+func _init_xr(interface):
 	var render_size = interface.get_render_target_size()
 	_xr_render_width = int(render_size.x)
 	_log("[XR] OpenXR render target: %dx%d" % [render_size.x, render_size.y])
@@ -794,18 +824,13 @@ func _ready():
 
 	settings_controller.apply_display_refresh_rate()
 
+func _init_backgrounds_and_comp_layer():
 	_create_backgrounds()
-
 	_screen_mesh_original_mat = screen_mesh.material_override
 	_setup_comp_layer()
 	comp.connect_welcome_texture()
 
-	await get_tree().create_timer(0.5).timeout
-	_reposition_screen_and_ui()
-
-	screen_mesh.extra_cull_margin = 10.0
-	ui_panel_3d.extra_cull_margin = 10.0
-
+func _init_post_xr():
 	state_manager.load_state()
 
 	if comp.available:
@@ -820,6 +845,7 @@ func _ready():
 	ui_visible = false
 	_set_ui_visible(false)
 
+func _init_textures_and_ui():
 	var saved_ip = ""
 	if config_mgr:
 		config_mgr.load_config()
@@ -846,32 +872,22 @@ func _ready():
 	ui_controller.update_ui()
 	ui_controller.update_stereo_shader()
 
-	if _auto_connect:
-		var v2_cm = stream_backend.get_config_manager()
-		if v2_cm:
-			var v2_hosts = v2_cm.get_hosts()
-			if v2_hosts.size() > 0:
-				var h = v2_hosts[0]
-				var host_ip = h.get("localaddress", "") if h.has("localaddress") else saved_ip
-				var host_id = h.get("id", -1) if h.has("id") else -1
-				if host_id != -1 and host_ip != "":
-					current_host_id = host_id
-					%IPInput.text = host_ip
-					_log("[AUTO-CONNECT] Auto-connecting to host_id=%d ip=%s" % [host_id, host_ip])
-					_auto_connect = false
-					await get_tree().create_timer(1.0).timeout
-					stream_manager.start_stream(host_id, _selected_app_id)
-
-	Input.joy_connection_changed.connect(func(device, connected):
-		_on_joy_changed(device, connected)
-	)
-
-	if right_hand:
-		right_hand.pose = "aim"
-	if left_hand:
-		left_hand.pose = "aim"
-
-	_post_ready_check.call_deferred()
+func _try_auto_connect():
+	var saved_ip = %IPInput.text
+	var v2_cm = stream_backend.get_config_manager()
+	if v2_cm:
+		var v2_hosts = v2_cm.get_hosts()
+		if v2_hosts.size() > 0:
+			var h = v2_hosts[0]
+			var host_ip = h.get("localaddress", "") if h.has("localaddress") else saved_ip
+			var host_id = h.get("id", -1) if h.has("id") else -1
+			if host_id != -1 and host_ip != "":
+				current_host_id = host_id
+				%IPInput.text = host_ip
+				_log("[AUTO-CONNECT] Auto-connecting to host_id=%d ip=%s" % [host_id, host_ip])
+				_auto_connect = false
+				await get_tree().create_timer(1.0).timeout
+				stream_manager.start_stream(host_id, _selected_app_id)
 
 func _post_ready_check():
 	await get_tree().create_timer(0.5).timeout
@@ -883,100 +899,26 @@ func _on_joy_changed(device: int, connected: bool):
 
 func _process(delta):
 	if is_xr_active:
-		var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
-		if hands_active != _is_using_hands:
-			_is_using_hands = hands_active
-			if _is_using_hands:
-				_log("[INPUT] Hand Tracking active, hiding controller models")
-				_set_controller_models_visible(false)
-			else:
-				_log("[INPUT] Controllers active, showing controller models")
-				_set_controller_models_visible(true)
-		
-		if _is_using_hands:
-			var right_tracker = XRServer.get_tracker("/user/hand_tracker/right")
-			var left_tracker = XRServer.get_tracker("/user/hand_tracker/left")
-			if right_tracker:
-				_update_hand_tracker_transform(right_hand, right_tracker)
-				_update_hand_visualizer(right_hand_visual, right_tracker)
-			if left_tracker:
-				_update_hand_tracker_transform(left_hand, left_tracker)
-				_update_hand_visualizer(left_hand_visual, left_tracker)
-		else:
-			if right_hand_visual: right_hand_visual.visible = false
-			if left_hand_visual: left_hand_visual.visible = false
-		if Engine.get_frames_drawn() % 90 == 0:
-			_log("[INPUT-DEBUG] HandsActive: %s, RightHand tracker: %s, pos: %s, rot: %s" % [
-				str(_is_using_hands),
-				str(right_hand.tracker),
-				str(right_hand.global_position),
-				str(right_hand.global_rotation)
-			])
+		_process_hand_tracking(delta)
 
 	if Engine.get_frames_drawn() % 120 == 0:
 		_flush_log()
 
-	if is_xr_active:
-		if not controller_mapper or not controller_mapper.is_active():
-			var b_pressed = right_hand.is_button_pressed("by_button")
-			if b_pressed and not _was_b_pressed:
-				_toggle_ui()
-			_was_b_pressed = b_pressed
-			var a_pressed = right_hand.is_button_pressed("ax_button")
-			if a_pressed and not _was_a_pressed:
-				virtual_keyboard.toggle()
-			_was_a_pressed = a_pressed
-			var r_stick_click = right_hand.is_button_pressed("primary_click")
-			var l_stick_click = left_hand.is_button_pressed("primary_click") if left_hand else false
-			if r_stick_click and not _was_r_stick_click and not l_stick_click:
-				var tp_exited = virtual_keyboard and virtual_keyboard.thumbstick_exit_flag
-				if not virtual_keyboard or (not virtual_keyboard.trackpad_active and not tp_exited):
-					settings_controller.cycle_sbs_mode()
-			if not r_stick_click:
-				if virtual_keyboard:
-					virtual_keyboard.thumbstick_exit_flag = false
-			_was_r_stick_click = r_stick_click
-		if _startup_reposition:
-			if xr_camera.global_position.length_squared() > 0.01:
-				_reposition_screen_and_ui()
-				_startup_reposition = false
+	_process_button_input()
 
 	if right_click_cooldown > 0.0:
 		right_click_cooldown -= delta
 
-	if Input.is_action_just_pressed("ui_focus_next"):
-		if mouse_captured_by_stream:
-			input_handler.release_stream_mouse()
-
-	if Input.is_key_pressed(KEY_CTRL) and Input.is_key_pressed(KEY_ALT) and Input.is_key_pressed(KEY_SHIFT):
-		if mouse_captured_by_stream:
-			input_handler.release_stream_mouse()
+	_process_input_release()
 
 	if not mouse_captured_by_stream:
 		xr_interaction.handle_pointer_interaction()
 	xr_interaction.handle_scroll()
 	_update_cursor_layer()
 
-	if is_streaming and idle_timeout_min > 0:
-		if right_hand:
-			var trigger = right_hand.get_float("trigger")
-			var primary = right_hand.get_float("primary")
-			var grip = right_hand.get_float("grip")
-			if trigger > 0.1 or primary > 0.1 or grip > 0.1:
-				_last_activity_time = Time.get_ticks_msec() / 1000.0
-		if left_hand:
-			var l_trigger = left_hand.get_float("trigger")
-			var l_primary = left_hand.get_float("primary")
-			var l_grip = left_hand.get_float("grip")
-			if l_trigger > 0.1 or l_primary > 0.1 or l_grip > 0.1:
-				_last_activity_time = Time.get_ticks_msec() / 1000.0
+	_process_idle_activity()
 
-	if is_xr_active:
-		for i in range(bg_names.size()):
-			var bg = get_node_or_null(bg_names[i])
-			if bg and bg.visible:
-				bg.global_position = xr_camera.global_position + bg_offsets[i]
-				break
+	_process_background_follow()
 
 	auto_detect.process(delta)
 
@@ -989,41 +931,141 @@ func _process(delta):
 			if comp_shader_mat_right and not comp_shader_mat_right.get_shader_parameter("depth_texture"):
 				comp_shader_mat_right.set_shader_parameter("depth_texture", dt)
 
-	if is_streaming:
-		if comp.in_use:
-			var cur_filter = smooth_mode
-			var cur_sharpen = float(sharpen_mode) * 0.5
-			var cur_blur_scale = float(host_resolution.x) / float(_xr_render_width) if _xr_render_width > 0 else 1.0
-			if cur_filter != _cached_filter_mode or cur_sharpen != _cached_sharpen or cur_blur_scale != _cached_blur_scale:
-				_cached_filter_mode = cur_filter
-				_cached_sharpen = cur_sharpen
-				_cached_blur_scale = cur_blur_scale
-				settings_controller.apply_filter()
-		stats_frame_times.append(delta)
-		stats_timer += delta
-		if stats_timer >= 0.5:
-			var avg = 0.0
-			for t in stats_frame_times:
-				avg += t
-			if stats_frame_times.size() > 0:
-				avg /= stats_frame_times.size()
-			stats_fps = 1.0 / avg if avg > 0 else 0.0
-			stream_manager.update_stats()
-			stats_timer = 0.0
-			stats_frame_times.clear()
+	_process_stats(delta)
 
-	if is_streaming and idle_timeout_min > 0:
-		var now = Time.get_ticks_msec() / 1000.0
-		if now - _last_activity_time > idle_timeout_min * 60.0:
-			_log("[IDLE] Idle timeout (%d min), disconnecting" % idle_timeout_min)
-			disconnect_stream()
-			_full_disconnect_cleanup("Idle timeout")
+	_process_idle_timeout()
 
 	if grabbed_node:
 		xr_interaction.handle_grab()
 
 	if grabbed_corner_idx >= 0:
 		xr_interaction.handle_corner_resize()
+
+func _process_hand_tracking(_delta):
+	var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
+	if hands_active != _is_using_hands:
+		_is_using_hands = hands_active
+		if _is_using_hands:
+			_log("[INPUT] Hand Tracking active, hiding controller models")
+			_set_controller_models_visible(false)
+		else:
+			_log("[INPUT] Controllers active, showing controller models")
+			_set_controller_models_visible(true)
+
+	if _is_using_hands:
+		var right_tracker = XRServer.get_tracker("/user/hand_tracker/right")
+		var left_tracker = XRServer.get_tracker("/user/hand_tracker/left")
+		if right_tracker:
+			_update_hand_tracker_transform(right_hand, right_tracker)
+			_update_hand_visualizer(right_hand_visual, right_tracker)
+		if left_tracker:
+			_update_hand_tracker_transform(left_hand, left_tracker)
+			_update_hand_visualizer(left_hand_visual, left_tracker)
+	else:
+		if right_hand_visual: right_hand_visual.visible = false
+		if left_hand_visual: left_hand_visual.visible = false
+	if Engine.get_frames_drawn() % 90 == 0:
+		_log("[INPUT-DEBUG] HandsActive: %s, RightHand tracker: %s, pos: %s, rot: %s" % [
+			str(_is_using_hands),
+			str(right_hand.tracker),
+			str(right_hand.global_position),
+			str(right_hand.global_rotation)
+		])
+
+func _process_button_input():
+	if not is_xr_active:
+		return
+	if not controller_mapper or not controller_mapper.is_active():
+		var b_pressed = right_hand.is_button_pressed("by_button")
+		if b_pressed and not _was_b_pressed:
+			_toggle_ui()
+		_was_b_pressed = b_pressed
+		var a_pressed = right_hand.is_button_pressed("ax_button")
+		if a_pressed and not _was_a_pressed:
+			virtual_keyboard.toggle()
+		_was_a_pressed = a_pressed
+		var r_stick_click = right_hand.is_button_pressed("primary_click")
+		var l_stick_click = left_hand.is_button_pressed("primary_click") if left_hand else false
+		if r_stick_click and not _was_r_stick_click and not l_stick_click:
+			var tp_exited = virtual_keyboard and virtual_keyboard.thumbstick_exit_flag
+			if not virtual_keyboard or (not virtual_keyboard.trackpad_active and not tp_exited):
+				settings_controller.cycle_sbs_mode()
+		if not r_stick_click:
+			if virtual_keyboard:
+				virtual_keyboard.thumbstick_exit_flag = false
+		_was_r_stick_click = r_stick_click
+	if _startup_reposition:
+		if xr_camera.global_position.length_squared() > 0.01:
+			_reposition_screen_and_ui()
+			_startup_reposition = false
+
+func _process_input_release():
+	if Input.is_action_just_pressed("ui_focus_next"):
+		if mouse_captured_by_stream:
+			input_handler.release_stream_mouse()
+
+	if Input.is_key_pressed(KEY_CTRL) and Input.is_key_pressed(KEY_ALT) and Input.is_key_pressed(KEY_SHIFT):
+		if mouse_captured_by_stream:
+			input_handler.release_stream_mouse()
+
+func _process_idle_activity():
+	if not is_streaming or idle_timeout_min <= 0:
+		return
+	if right_hand:
+		var trigger = right_hand.get_float("trigger")
+		var primary = right_hand.get_float("primary")
+		var grip = right_hand.get_float("grip")
+		if trigger > 0.1 or primary > 0.1 or grip > 0.1:
+			_last_activity_time = Time.get_ticks_msec() / 1000.0
+	if left_hand:
+		var l_trigger = left_hand.get_float("trigger")
+		var l_primary = left_hand.get_float("primary")
+		var l_grip = left_hand.get_float("grip")
+		if l_trigger > 0.1 or l_primary > 0.1 or l_grip > 0.1:
+			_last_activity_time = Time.get_ticks_msec() / 1000.0
+
+func _process_background_follow():
+	if not is_xr_active:
+		return
+	for i in range(bg_names.size()):
+		var bg = get_node_or_null(bg_names[i])
+		if bg and bg.visible:
+			bg.global_position = xr_camera.global_position + bg_offsets[i]
+			break
+
+func _process_stats(delta):
+	if not is_streaming:
+		return
+	if comp.in_use:
+		var cur_filter = smooth_mode
+		var cur_sharpen = float(sharpen_mode) * 0.5
+		var cur_blur_scale = float(host_resolution.x) / float(_xr_render_width) if _xr_render_width > 0 else 1.0
+		if cur_filter != _cached_filter_mode or cur_sharpen != _cached_sharpen or cur_blur_scale != _cached_blur_scale:
+			_cached_filter_mode = cur_filter
+			_cached_sharpen = cur_sharpen
+			_cached_blur_scale = cur_blur_scale
+			settings_controller.apply_filter()
+	stats_frame_times.append(delta)
+	stats_timer += delta
+	if stats_timer >= 0.5:
+		var avg = 0.0
+		for t in stats_frame_times:
+			avg += t
+		if stats_frame_times.size() > 0:
+			avg /= stats_frame_times.size()
+		stats_fps = 1.0 / avg if avg > 0 else 0.0
+		stream_manager.update_stats()
+		stats_timer = 0.0
+		stats_frame_times.clear()
+
+func _process_idle_timeout():
+	if not is_streaming or idle_timeout_min <= 0:
+		return
+	var now = Time.get_ticks_msec() / 1000.0
+	if now - _last_activity_time > idle_timeout_min * 60.0:
+		_log("[IDLE] Idle timeout (%d min), disconnecting" % idle_timeout_min)
+		disconnect_stream()
+		_full_disconnect_cleanup("Idle timeout")
 
 func _notification(what):
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
