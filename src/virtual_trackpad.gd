@@ -1,8 +1,10 @@
 class_name VirtualTrackpad
 extends VRPanelBase
 
-var mesh_size := Vector2(0.25, 0.25)
-var viewport_size := Vector2i(500, 500)
+func _init(owner: Node3D):
+	super(owner)
+	mesh_size = Vector2(0.25, 0.25)
+	viewport_size = Vector2i(500, 500)
 var _tp_root: Control
 var _border: PanelContainer
 var _bg: PanelContainer

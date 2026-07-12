@@ -3,6 +3,8 @@ package com.godot.game;
 import org.godotengine.godot.Godot;
 import org.godotengine.godot.GodotActivity;
 
+import android.content.Context;
+import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -15,6 +17,7 @@ public class GodotApp extends GodotActivity {
 
 	public static String jniResult = "NOT_RUN";
 	public static DepthEstimator depthEstimator;
+	public static WifiManager.MulticastLock multicastLock;
 
 	static {
 		if (BuildConfig.FLAVOR.equals("mono")) {
@@ -26,15 +29,26 @@ public class GodotApp extends GodotActivity {
 			}
 		}
 		try {
-			if (BuildConfig.DEBUG) {
-				System.loadLibrary("nightfall-stream.android.template_debug.arm64");
-			} else {
-				System.loadLibrary("nightfall-stream.android.template_release.arm64");
-			}
+			System.loadLibrary("nightfall-stream.android.template_release.arm64");
 			initializeMoonlightJNI();
 			jniResult = "SUCCESS";
 		} catch (Throwable e) {
 			jniResult = "FAILED: " + e.getClass().getName() + ": " + e.getMessage();
+		}
+	}
+
+	public static void acquireMulticastLock(Context context) {
+		if (multicastLock != null) return;
+		try {
+			WifiManager wifi = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+			if (wifi != null) {
+				multicastLock = wifi.createMulticastLock("nightfall-mdns");
+				multicastLock.setReferenceCounted(false);
+				multicastLock.acquire();
+				Log.i("GODOT", "MulticastLock acquired for mDNS discovery");
+			}
+		} catch (Exception e) {
+			Log.e("GODOT", "Failed to acquire MulticastLock: " + e.getMessage());
 		}
 	}
 
@@ -53,6 +67,7 @@ public class GodotApp extends GodotActivity {
 		EdgeToEdge.enable(this);
 		super.onCreate(savedInstanceState);
 		setAndroidContext(getApplicationContext());
+		acquireMulticastLock(getApplicationContext());
 		depthEstimator = new DepthEstimator();
 		depthEstimator.initialize(getApplicationContext());
 		Log.i("GODOT", "DepthEstimator initialized: " + depthEstimator.isInitialized());

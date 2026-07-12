@@ -1,8 +1,10 @@
 class_name VirtualKeyboard
 extends VRPanelBase
 
-var mesh_size := Vector2(1.04, 0.3)
-var viewport_size := Vector2i(2080, 600)
+func _init(owner: Node3D):
+	super(owner)
+	mesh_size = Vector2(1.04, 0.3)
+	viewport_size = Vector2i(2080, 600)
 var _kb_width := 1640
 var _tp_width := 440
 var _key_area_width := 1600

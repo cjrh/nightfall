@@ -67,9 +67,28 @@ func start_stream(host_id: int, app_id: int):
 
 func _on_v2_launch_response(response: Dictionary):
 	if response.get("status", "") != "success":
-		main._log("[STREAM] Launch failed: %s" % response.get("message", "unknown"))
-		main._ui_status_label.text = "Launch failed: " + str(response.get("message", "unknown"))
-		main.welcome_screen.show_welcome_screen("server")
+		var msg = response.get("message", "unknown")
+		main._log("[STREAM] Launch failed: %s" % msg)
+		if msg.find("Session URL not found") != -1:
+			main._log("[PAIR] Launch failed due to stale pairing, re-pairing...")
+			var ip = ""
+			for h in _b().get_hosts():
+				if h.get("id") == main.current_host_id:
+					ip = h.get("localaddress", "")
+					break
+			if not ip.is_empty():
+				_b().get_config_manager().remove_host(main.current_host_id)
+				main._ui_status_label.text = "Re-pairing with " + ip + "..."
+				var pin = _b().start_pair(ip, 47989)
+				if str(pin) != "" and str(pin) != "0":
+					main._pair_pin = str(pin)
+					main.welcome_screen.show_welcome_screen("pin")
+					return
+			main._ui_status_label.text = "Pairing needed. Please re-select server."
+			main.welcome_screen.show_welcome_screen("server")
+		else:
+			main._ui_status_label.text = "Launch failed: " + str(msg)
+			main.welcome_screen.show_welcome_screen("server")
 		return
 
 	var server_info = {}
@@ -193,7 +212,7 @@ func on_pair_pressed():
 			break
 	if paired_host_id != -1:
 		main.current_host_id = paired_host_id
-		main._ui_status_label.text = "Already paired, starting stream..."
+		main._ui_status_label.text = "Connecting..."
 		await main.host_discovery.query_host_resolution(ip)
 		await start_stream(paired_host_id, main._selected_app_id)
 	else:

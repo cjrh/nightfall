@@ -262,6 +262,20 @@ func build_server_screen(parent: Node):
 	bottom_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(bottom_spacer)
 
+	var clear_btn = Button.new()
+	clear_btn.name = "ClearServersBtn"
+	clear_btn.custom_minimum_size = Vector2(400, 60)
+	clear_btn.add_theme_font_size_override("font_size", 24)
+	clear_btn.add_theme_color_override("font_color", Color(0.9, 0.5, 0.5, 1.0))
+	clear_btn.text = "Clear Saved Servers"
+	clear_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	screen.add_child(clear_btn)
+
+	var clear_spacer = Control.new()
+	clear_spacer.custom_minimum_size = Vector2(0, 16)
+	clear_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(clear_spacer)
+
 	var back_btn = Button.new()
 	back_btn.custom_minimum_size = Vector2(300, 60)
 	back_btn.add_theme_font_size_override("font_size", 28)
@@ -276,6 +290,7 @@ func build_server_screen(parent: Node):
 
 	add_btn.pressed.connect(func(): show_welcome_screen("ip"))
 	scan_btn.pressed.connect(func(): browse_mdns())
+	clear_btn.pressed.connect(func(): clear_saved_servers())
 	back_btn.pressed.connect(func(): show_welcome_screen("welcome"))
 
 func build_ip_screen(parent: Node):
@@ -647,6 +662,21 @@ func populate_server_list():
 			main.current_host_id = h.id
 			show_welcome_screen("welcome")
 		)
+
+func clear_saved_servers():
+	var _cm = main.stream_backend.get_config_manager() if main.stream_backend else null
+	if _cm:
+		_cm.clear_hosts()
+		main._log("[PAIR] Cleared all saved server pairings")
+	populate_server_list()
+	var screens = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens")
+	if screens:
+		var ws = screens.get_node_or_null("WelcomeScreen")
+		if ws:
+			var connect_btn = ws.get_node_or_null("WelcomeConnect")
+			if connect_btn:
+				connect_btn.text = "Connect"
+				connect_btn.disabled = false
 
 func start_pair(ip: String):
 	main.get_node("%IPInput").text = ip

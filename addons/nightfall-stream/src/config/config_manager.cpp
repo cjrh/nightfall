@@ -214,6 +214,13 @@ void NightfallConfigManager::remove_host(int index) {
     save_config();
 }
 
+void NightfallConfigManager::clear_hosts() {
+    if (!config->has_section("hosts"))
+        return;
+    config->erase_section("hosts");
+    save_config();
+}
+
 Array NightfallConfigManager::get_apps(int host_index) {
     Array apps;
     String base_prefix = _get_host_prefix(host_index);
@@ -358,6 +365,7 @@ void NightfallConfigManager::_bind_methods() {
     ClassDB::bind_method(D_METHOD("add_host", "data"), &NightfallConfigManager::add_host);
     ClassDB::bind_method(D_METHOD("update_host", "index", "data"), &NightfallConfigManager::update_host);
     ClassDB::bind_method(D_METHOD("remove_host", "index"), &NightfallConfigManager::remove_host);
+    ClassDB::bind_method(D_METHOD("clear_hosts"), &NightfallConfigManager::clear_hosts);
 
     ClassDB::bind_method(D_METHOD("get_apps", "host_index"), &NightfallConfigManager::get_apps);
     ClassDB::bind_method(D_METHOD("add_app", "host_index", "data"), &NightfallConfigManager::add_app);

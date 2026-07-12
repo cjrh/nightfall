@@ -180,14 +180,12 @@ var comp_bezel_rect_left: ColorRect = null
 var comp_bezel_rect_right: ColorRect = null
 var comp_shader_mat_left: ShaderMaterial = null
 var comp_shader_mat_right: ShaderMaterial = null
-var _comp.in_use_deprecated: bool = false
 var comp_stream_cursor: TextureRect = null
 var comp_stream_cursor_circle: ColorRect = null
 var comp_stream_cursor_left: TextureRect = null
 var comp_stream_cursor_circle_left: ColorRect = null
 var comp_stream_cursor_right: TextureRect = null
 var comp_stream_cursor_circle_right: ColorRect = null
-var _comp.available_deprecated: bool = false
 var _screen_mesh_original_mat: Material = null
 
 var _log_lines: PackedStringArray = []
@@ -303,7 +301,7 @@ func _hit_point_to_uv(hit_point: Vector3) -> Vector2:
 	var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
 	if curvature == 0:
 		uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
-	elif comp.in_use and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
+	elif comp and comp.in_use and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
 		var cam_pos = xr_camera.global_position
 		var ray_dir = (hit_point - cam_pos).normalized()
 		var screen_right = screen_mesh.global_transform.basis.x

@@ -3,11 +3,13 @@ extends RefCounted
 
 var main: Node3D
 var http_request: HTTPRequest
+var server_pair_status: int = -1
 
 func _init(owner: Node3D):
 	main = owner
 
 func query_host_resolution(ip: String):
+	server_pair_status = -1
 	if http_request == null:
 		http_request = HTTPRequest.new()
 		http_request.timeout = 5.0
@@ -38,6 +40,10 @@ func on_serverinfo_response(_result: int, code: int, _headers: PackedStringArray
 		return
 	var xml = body.get_string_from_utf8()
 	main._log("[RES] serverinfo full XML: %s" % xml)
+	var pair_status_raw = extract_xml_value(xml, "PairStatus")
+	if not pair_status_raw.is_empty():
+		server_pair_status = pair_status_raw.to_int()
+		main._log("[RES] PairStatus: %d" % server_pair_status)
 	var display_data = extract_display_info(xml)
 	var hostname = extract_hostname(xml)
 	if not hostname.is_empty():
@@ -83,6 +89,27 @@ func extract_hostname(xml: String) -> String:
 		return ""
 	start += tag.length()
 	var end = xml.find("</hostname>", start)
+	if end == -1:
+		return ""
+	return xml.substr(start, end - start).strip_edges()
+
+func extract_xml_value(xml: String, tag: String) -> String:
+	var start_tag = "<" + tag + ">"
+	var end_tag = "</" + tag + ">"
+	var start = xml.find(start_tag)
+	if start == -1:
+		var xml_lower = xml.to_lower()
+		var start_lower = "<" + tag.to_lower() + ">"
+		var end_lower = "</" + tag.to_lower() + ">"
+		start = xml_lower.find(start_lower)
+		if start == -1:
+			return ""
+		var end = xml_lower.find(end_lower, start + start_lower.length())
+		if end == -1:
+			return ""
+		return xml.substr(start + start_lower.length(), end - (start + start_lower.length())).strip_edges()
+	start += start_tag.length()
+	var end = xml.find(end_tag, start)
 	if end == -1:
 		return ""
 	return xml.substr(start, end - start).strip_edges()

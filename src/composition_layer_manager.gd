@@ -443,8 +443,17 @@ func update_cylinder_params():
 		main.comp_cylinder_right.global_position = main.screen_mesh.global_position - screen_forward * radius
 		main.comp_cylinder_right.global_rotation = main.screen_mesh.global_rotation
 
+var _transparent_mat: StandardMaterial3D = null
+
 func make_screen_transparent():
-	main.screen_mesh.visible = false
+	if _transparent_mat == null:
+		_transparent_mat = StandardMaterial3D.new()
+		_transparent_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_transparent_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_transparent_mat.albedo_color = Color(0, 0, 0, 0)
+	if main._screen_mesh_original_mat == null:
+		main._screen_mesh_original_mat = main.screen_mesh.material_override
+	main.screen_mesh.material_override = _transparent_mat
 
 func make_ui_transparent():
 	main.ui_panel_3d.visible = false
@@ -455,7 +464,9 @@ func make_kb_transparent():
 	main.virtual_keyboard.mesh_instance.visible = false
 
 func restore_screen_material():
-	main.screen_mesh.visible = true
+	if main._screen_mesh_original_mat != null:
+		main.screen_mesh.material_override = main._screen_mesh_original_mat
+		main._screen_mesh_original_mat = null
 	var screen_bar = main.get_node_or_null("%ScreenGrabBar")
 	if screen_bar:
 		screen_bar.visible = true

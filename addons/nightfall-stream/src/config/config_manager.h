@@ -45,6 +45,7 @@ public:
     int add_host(const Dictionary &data);
     void update_host(int index, const Dictionary &data);
     void remove_host(int index);
+    void clear_hosts();
 
     Array get_apps(int host_index);
     void add_app(int host_index, const Dictionary &data);

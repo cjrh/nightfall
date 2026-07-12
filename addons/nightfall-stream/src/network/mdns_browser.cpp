@@ -33,7 +33,7 @@ PackedByteArray MdnsBrowser::_build_ptr_query(const String &service_type) {
     }
 
     p[offset++] = 0x00; p[offset++] = 0x0C;
-    p[offset++] = 0x00; p[offset++] = 0x01;
+    p[offset++] = 0x80; p[offset++] = 0x01;
 
     buf.resize(offset);
     return buf;
@@ -251,6 +251,14 @@ Array MdnsBrowser::browse(float timeout) {
         NF_LOG("MdnsBrowser", "Failed to bind: %s", strerror(errno));
         close(sock);
         return results;
+    }
+
+    struct ip_mreq mreq;
+    memset(&mreq, 0, sizeof(mreq));
+    mreq.imr_multiaddr.s_addr = inet_addr("224.0.0.251");
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+        NF_LOG("MdnsBrowser", "IP_ADD_MEMBERSHIP failed: %s", strerror(errno));
     }
 
     PackedByteArray query = _build_ptr_query("_nvstream._tcp.local");
