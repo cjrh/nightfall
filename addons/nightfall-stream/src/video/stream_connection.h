@@ -140,7 +140,6 @@ private:
     SERVER_INFORMATION server_info_{};
     STREAM_CONFIGURATION stream_config_{};
 
-    std::chrono::steady_clock::time_point last_idr_request_;
     int active_video_format_ = 0;
     AVColorSpace current_colorspace_ = AVCOL_SPC_BT709;
     AVColorRange current_color_range_ = AVCOL_RANGE_UNSPECIFIED;

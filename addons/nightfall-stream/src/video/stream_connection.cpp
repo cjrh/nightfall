@@ -22,12 +22,6 @@
 #include <media/NdkImage.h>
 AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
 #endif
-#ifdef __ANDROID__
-#include "video/mediacodec_internal.h"
-#include <jni.h>
-#include <android/hardware_buffer.h>
-AHardwareBuffer *mediacodec_get_ahb(jobject media_codec_obj, ssize_t buffer_index);
-#endif
 
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -124,7 +118,7 @@ void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, 
     if (generation != render_generation_.load()) return;
 
     static int ep_log = 0;
-    if (++ep_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "_ensure_compute_pipeline: ready=%d rd=%p w=%d h=%d",
+    if (++ep_log <= 3) NF_LOG("VCONN", "_ensure_compute_pipeline: ready=%d rd=%p w=%d h=%d",
         (int)compute_pipeline_ready_, (void*)rd, width, height);
     if (compute_pipeline_ready_) return;
     if (!rd) return;
@@ -146,7 +140,7 @@ void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, 
     tv.instantiate();
 
     rgba_output_tex_ = rd->texture_create(tf, tv);
-    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RGBA output tex: %s", rgba_output_tex_.is_valid() ? "OK" : "FAIL");
+    NF_LOG("VCONN", "RGBA output tex: %s", rgba_output_tex_.is_valid() ? "OK" : "FAIL");
 
     // Create dummy sampler (placeholder, engine patch will override with YCbCr sampler)
     Ref<RDSamplerState> sampler_state;
@@ -156,7 +150,7 @@ void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, 
     sampler_state->set_repeat_u(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
     sampler_state->set_repeat_v(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
     dummy_sampler_ = rd->sampler_create(sampler_state);
-    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Dummy sampler: %s", dummy_sampler_.is_valid() ? "OK" : "FAIL");
+    NF_LOG("VCONN", "Dummy sampler: %s", dummy_sampler_.is_valid() ? "OK" : "FAIL");
 
     // Create compute shader from SPIRV
     PackedByteArray spirv;
@@ -168,12 +162,12 @@ void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, 
     spirv_data->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, spirv);
 
     compute_shader_ = rd->shader_create_from_spirv(spirv_data);
-    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute shader: %s", compute_shader_.is_valid() ? "OK" : "FAIL");
+    NF_LOG("VCONN", "Compute shader: %s", compute_shader_.is_valid() ? "OK" : "FAIL");
 
     if (!compute_shader_.is_valid()) return;
 
     compute_pipeline_ = rd->compute_pipeline_create(compute_shader_);
-    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute pipeline: %s", compute_pipeline_.is_valid() ? "OK" : "FAIL");
+    NF_LOG("VCONN", "Compute pipeline: %s", compute_pipeline_.is_valid() ? "OK" : "FAIL");
 
     if (!compute_pipeline_.is_valid()) return;
 
@@ -181,7 +175,7 @@ void StreamConnection::_ensure_compute_pipeline(RenderingDevice *rd, int width, 
     uploader_->ensure_shader_material();
 
     compute_pipeline_ready_ = true;
-    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Compute pipeline ready! %dx%d", width, height);
+    NF_LOG("VCONN", "Compute pipeline ready! %dx%d", width, height);
 }
 
 bool StreamConnection::_get_or_create_ahb_import(RenderingDevice *rd,
@@ -310,7 +304,7 @@ bool StreamConnection::_retire_all_ahb_imports() {
 
 void StreamConnection::_render_compute_dispatch_rt() {
     static int rt_enter = 0;
-    if (++rt_enter == 1) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT_ENTER");
+    if (++rt_enter == 1) NF_LOG("VCONN", "RT_ENTER");
 
     uint64_t buffer_id = 0;
     uint64_t generation = 0;
@@ -457,7 +451,7 @@ void StreamConnection::_render_compute_dispatch_rt() {
         RenderingServer *rs = RenderingServer::get_singleton();
         if (rs) {
             RID rs_tex = rs->texture_rd_create(rgba_output_tex_);
-            __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: rs_texture_rd_create valid=%d", (int)rs_tex.is_valid());
+            NF_LOG("VCONN", "RT: rs_texture_rd_create valid=%d", (int)rs_tex.is_valid());
             uploader_->ensure_shader_material();
             Ref<ShaderMaterial> mat = uploader_->get_shader_material();
             if (mat.is_valid() && rs_tex.is_valid()) {
@@ -466,7 +460,7 @@ void StreamConnection::_render_compute_dispatch_rt() {
                 mat->set_shader_parameter("color_range", 1);
                 mat->set_shader_parameter("is_nv12_rd", false);
                 mat->set_shader_parameter("is_semi_planar", false);
-                __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: tex_y set AFTER compute dispatch");
+                NF_LOG("VCONN", "RT: tex_y set AFTER compute dispatch");
             }
         }
     }
@@ -475,7 +469,7 @@ void StreamConnection::_render_compute_dispatch_rt() {
     if (!cached_dispatch) release_uncached();
 
     static int rt_done = 0;
-    if (++rt_done <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "RT: dispatch complete");
+    if (++rt_done <= 3) NF_LOG("VCONN", "RT: dispatch complete");
 }
 
 void StreamConnection::_render_free_pipeline_rt() {
@@ -1199,7 +1193,7 @@ void StreamConnection::_decode_thread_func() {
                     ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
 
                 if (!(rd && rd->has_method("texture_create_from_android_hardware_buffer") && frame.buffer)) {
-                    __android_log_print(ANDROID_LOG_ERROR, "STRDEBG", "SKIP: rd=%p has=%d buf=%p",
+                    NF_LOGE("VCONN", "SKIP: rd=%p has=%d buf=%p",
                         (void*)rd, rd ? (int)rd->has_method("texture_create_from_android_hardware_buffer") : -1,
                         (void*)frame.buffer);
                     codec->release_frame(frame);
@@ -1309,12 +1303,12 @@ void StreamConnection::_decode_thread_func() {
 
                 rs->call_on_render_thread(callable_mp(this, &StreamConnection::_render_compute_dispatch_rt));
                 static int q_log = 0;
-                if (++q_log <= 3) __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "CALL queued rt=%d", q_log);
+                if (++q_log <= 3) NF_LOG("VCONN", "CALL queued rt=%d", q_log);
 
                 frames_decoded_.fetch_add(1);
                 static int log_count = 0;
                 if (++log_count <= 10)
-                    __android_log_print(ANDROID_LOG_INFO, "STRDEBG", "Queued compute dispatch %dx%d frame=%d", frame.width, frame.height, log_count);
+                    NF_LOG("VCONN", "Queued compute dispatch %dx%d frame=%d", frame.width, frame.height, log_count);
 
                 auto decode_done = std::chrono::steady_clock::now();
                 auto decode_done_us = std::chrono::duration_cast<std::chrono::microseconds>(decode_done.time_since_epoch()).count();
@@ -1650,7 +1644,6 @@ void StreamConnection::start(const String &host, const Dictionary &server_info, 
 
     active_instance_ = this;
     AudioRenderer::active_instance_ = audio_renderer_.ptr();
-    last_idr_request_ = std::chrono::steady_clock::now();
 
     connection_thread_ = std::thread(&StreamConnection::_connection_thread_func, this);
     decode_thread_ = std::thread(&StreamConnection::_decode_thread_func, this);
