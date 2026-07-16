@@ -67,6 +67,9 @@ var _was_b_pressed: bool = false
 var _was_a_pressed: bool = false
 var _was_r_stick_click: bool = false
 var _startup_reposition: int = 0  # 0=waiting for tracking, 1=centered, 2=positioning
+var _startup_cover: MeshInstance3D
+var _startup_cover_countdown: int = 0
+var _startup_ready: bool = false
 
 var _is_using_hands: bool = false
 var tracking_mode: int = 0
@@ -618,6 +621,21 @@ func _ready():
 	_log("=== Nightfall started ===")
 	Engine.max_fps = 0
 
+	_startup_cover = MeshInstance3D.new()
+	_startup_cover.name = "StartupCover"
+	var quad = QuadMesh.new()
+	quad.size = Vector2(20.0, 20.0)
+	_startup_cover.mesh = quad
+	_startup_cover.position = Vector3(0, 0, -0.3)
+	var cov_mat = StandardMaterial3D.new()
+	cov_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cov_mat.albedo_color = Color(0, 0, 0, 1)
+	cov_mat.render_priority = 127
+	_startup_cover.material_override = cov_mat
+	xr_camera.add_child(_startup_cover)
+	_startup_cover_countdown = 180
+	_log("[COVER] Startup cover active, countdown=%d" % _startup_cover_countdown)
+
 	if OS.get_name() == "Android":
 		OS.set_environment("CURL_CA_BUNDLE", "/system/etc/security/cacerts/")
 		OS.set_environment("SSL_CERT_FILE", "/system/etc/security/cacerts/")
@@ -844,6 +862,7 @@ func _init_post_xr():
 	ui_visible = false
 	_set_ui_visible(false)
 	_ui_has_saved_offset = false
+	_startup_ready = true
 
 func _init_textures_and_ui():
 	var saved_ip = ""
@@ -940,6 +959,12 @@ func _process(delta):
 
 	if grabbed_corner_idx >= 0:
 		xr_interaction.handle_corner_resize()
+
+	if _startup_cover:
+		if _startup_ready and _startup_reposition == -1:
+			_startup_cover.queue_free()
+			_startup_cover = null
+			_log("[COVER] Startup cover removed")
 
 func _process_hand_tracking(_delta):
 	var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
