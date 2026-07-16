@@ -13,76 +13,84 @@ func create_corner_handles():
 		Vector2(-0.5, -0.5),
 		Vector2(0.5, -0.5),
 	]
+	var corner_ids = ["top-left", "top-right", "bottom-left", "bottom-right"]
 	var mesh_size = main._mesh_size
+	var corner_size = mesh_size.x * 0.027
+	var col_size = mesh_size.x * 0.067
 	for i in range(4):
 		var handle = MeshInstance3D.new()
 		handle.name = "Corner%d" % i
 		var mat = StandardMaterial3D.new()
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = Color(1, 1, 1, 0.01)
-		var h_bar = MeshInstance3D.new()
-		h_bar.name = "HBar"
-		var h_mesh = BoxMesh.new()
-		h_mesh.size = Vector3(0.15, 0.008, 0.008)
-		h_bar.mesh = h_mesh
-		h_bar.material_override = mat.duplicate()
-		h_bar.position = Vector3(-offsets[i].x * 0.15, 0, 0)
-		var v_bar = MeshInstance3D.new()
-		v_bar.name = "VBar"
-		var v_mesh = BoxMesh.new()
-		v_mesh.size = Vector3(0.008, 0.15, 0.008)
-		v_bar.mesh = v_mesh
-		v_bar.material_override = mat.duplicate()
-		v_bar.position = Vector3(0, -offsets[i].y * 0.15, 0)
+		mat.albedo_color = Color(1, 1, 1, 0)
+		mat.albedo_texture = _make_corner_texture(corner_ids[i])
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.render_priority = 127
+		var corner_quad = QuadMesh.new()
+		corner_quad.size = Vector2(corner_size, corner_size)
+		corner_quad.orientation = PlaneMesh.FACE_Z
+		handle.mesh = corner_quad
+		handle.material_override = mat
 		var area = Area3D.new()
 		area.collision_layer = 2
 		var shape = CollisionShape3D.new()
 		var col = BoxShape3D.new()
-		col.size = Vector3(0.2, 0.2, 0.1)
+		col.size = Vector3(col_size, col_size, 0.1)
 		shape.shape = col
 		shape.position = Vector3(0, 0, 0.06)
 		area.add_child(shape)
-		handle.add_child(h_bar)
-		handle.add_child(v_bar)
 		handle.add_child(area)
-		handle.position = Vector3(offsets[i].x * (mesh_size.x + 0.20), offsets[i].y * (mesh_size.y + 0.20), 0)
+		handle.position = Vector3(offsets[i].x * (mesh_size.x + corner_size), offsets[i].y * (mesh_size.y + corner_size), 0)
 		main.screen_mesh.add_child(handle)
 		main.corner_handles.append(handle)
 
 func update_corner_positions():
 	var mesh_size = main._mesh_size
-	var corner_z = 0.0
-	var extra_out = 0.0
-	if main.curvature > 0:
-		var radius = 10.0 if main.curvature == 1 else 4.0
-		var angle = mesh_size.x / radius
-		var half_angle = angle * 0.5
-		var chord_half = sin(half_angle) * radius
-		var extra = chord_half - mesh_size.x * 0.5
-		if main.curvature == 2:
-			extra += 0.30
-		else:
-			extra += 0.22
-		extra_out = extra
-		corner_z = -(cos(half_angle) * radius - radius) - 0.02
+	var radius = 1000.0 if main.curvature == 0 else (10.0 if main.curvature == 1 else 4.0)
+	var half_angle = mesh_size.x / radius * 0.5
+	var edge_x = sin(half_angle) * radius
+	var edge_z = -(cos(half_angle) * radius - radius)
 	var offsets = [
 		Vector2(-0.5, 0.5),
 		Vector2(0.5, 0.5),
 		Vector2(-0.5, -0.5),
 		Vector2(0.5, -0.5),
 	]
-	var y_extra = 0.20 if main.curvature > 0 else 0.15
+	var corner_size = mesh_size.x * 0.027
+	var col_size = mesh_size.x * 0.067
+	var grab_bar_off = mesh_size.y * 0.119
 	for i in range(4):
-		var cx = offsets[i].x * (mesh_size.x + 0.20)
-		if main.curvature > 0:
-			var radius = 10.0 if main.curvature == 1 else 4.0
-			var half_angle = mesh_size.x / radius * 0.5
-			var a = -half_angle if offsets[i].x < 0 else half_angle
-			cx = sin(a) * radius
-			cx += -extra_out if offsets[i].x < 0 else extra_out
-		main.corner_handles[i].position = Vector3(cx, offsets[i].y * (mesh_size.y + y_extra), corner_z)
-	main.get_node("%ScreenGrabBar").position.y = -mesh_size.y / 2.0 - 0.15
+		var handle = main.corner_handles[i]
+		if handle.mesh is QuadMesh:
+			handle.mesh.size = Vector2(corner_size, corner_size)
+		for child in handle.get_children():
+			if child is Area3D:
+				for c in child.get_children():
+					if c is CollisionShape3D and c.shape is BoxShape3D:
+						c.shape.size = Vector3(col_size, col_size, 0.1)
+		var cy = offsets[i].y * (mesh_size.y + corner_size)
+		var a = half_angle if offsets[i].x > 0 else -half_angle
+		var cx = edge_x if offsets[i].x > 0 else -edge_x
+		if offsets[i].x > 0:
+			cx += corner_size * 0.5
+		else:
+			cx -= corner_size * 0.5
+		handle.position = Vector3(cx, cy, edge_z)
+		handle.rotation.y = -a
+	var grab_bar = main.get_node("%ScreenGrabBar")
+	grab_bar.position.y = -mesh_size.y / 2.0 - grab_bar_off
+	if grab_bar.mesh is CylinderMesh:
+		var grab_r = mesh_size.x * 0.0045
+		var grab_h = mesh_size.x * 0.134
+		grab_bar.mesh.top_radius = grab_r
+		grab_bar.mesh.bottom_radius = grab_r
+		grab_bar.mesh.height = grab_h
+	var grab_area = grab_bar.get_node_or_null("Area3D")
+	if grab_area:
+		var grab_shape = grab_area.get_node_or_null("CollisionShape3D")
+		if grab_shape and grab_shape.shape is BoxShape3D:
+			grab_shape.shape.size = Vector3(mesh_size.x * 0.134, mesh_size.y * 0.079, 0.1)
 
 func create_bezel():
 	main.bezel_mesh = MeshInstance3D.new()
@@ -254,3 +262,25 @@ func set_screen_collision_curved(verts: PackedVector3Array, indices: PackedInt32
 	var concave = ConcavePolygonShape3D.new()
 	concave.set_faces(faces)
 	col_shape.shape = concave
+
+func _make_corner_texture(corner: String, size: int = 128, thickness: int = 20, opacity: float = 0.08) -> ImageTexture:
+	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var color = Color(1, 1, 1, opacity)
+	var s = size
+	var t = thickness
+	var pad = 16
+	match corner:
+		"top-left":
+			img.fill_rect(Rect2i(pad, pad, s - 2 * pad, t), color)
+			img.fill_rect(Rect2i(pad, pad + t, t, s - 2 * pad - t), color)
+		"top-right":
+			img.fill_rect(Rect2i(pad, pad, s - 2 * pad, t), color)
+			img.fill_rect(Rect2i(s - pad - t, pad + t, t, s - 2 * pad - t), color)
+		"bottom-left":
+			img.fill_rect(Rect2i(pad, s - pad - t, s - 2 * pad, t), color)
+			img.fill_rect(Rect2i(pad, pad, t, s - 2 * pad - t), color)
+		"bottom-right":
+			img.fill_rect(Rect2i(pad, s - pad - t, s - 2 * pad, t), color)
+			img.fill_rect(Rect2i(s - pad - t, pad, t, s - 2 * pad - t), color)
+	return ImageTexture.create_from_image(img)

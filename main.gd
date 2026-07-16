@@ -66,7 +66,8 @@ var right_click_cooldown: float = 0.0
 var _was_b_pressed: bool = false
 var _was_a_pressed: bool = false
 var _was_r_stick_click: bool = false
-var _startup_reposition: bool = true
+var _startup_reposition: int = 0  # 0=waiting for tracking, 1=centered, 2=positioning
+
 var _is_using_hands: bool = false
 var tracking_mode: int = 0
 var tracking_labels: Array = ["Off", "Hands"]
@@ -110,7 +111,7 @@ var smooth_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
 var sharpen_labels: Array = ["0%", "10%", "20%", "30%", "40%", "50%"]
 var _xr_base_render_scale: float = 1.0
 var _xr_render_width: int = 2064
-var _mesh_size: Vector2 = Vector2(3.2, 1.8)
+var _mesh_size: Vector2 = Vector2(2.24, 1.26)
 var stream_fps: int = 60
 var _cached_filter_mode: int = -1
 var _cached_sharpen: float = -1.0
@@ -189,7 +190,7 @@ var comp_stream_cursor_circle_right: ColorRect = null
 var _screen_mesh_original_mat: Material = null
 
 var _log_lines: PackedStringArray = []
-var _ui_viewport_size := Vector2i(600, 290)
+var _ui_viewport_size := Vector2i(1200, 580)
 var _ui_mesh_size := Vector2(1.20, 0.58)
 var _ui_host_label: Label
 var _ui_status_label: Label
@@ -514,6 +515,7 @@ func _on_stream_started():
 	if not was_restarting:
 		ui_visible = false
 		_set_ui_visible(false)
+		_ui_has_saved_offset = false
 		if comp_ui:
 			comp_ui.visible = false
 	if passthrough_mode < 2:
@@ -644,7 +646,6 @@ func _ready():
 	_init_xr(interface)
 	_init_backgrounds_and_comp_layer()
 	await get_tree().create_timer(0.5).timeout
-	_reposition_screen_and_ui()
 	screen_mesh.extra_cull_margin = 10.0
 	ui_panel_3d.extra_cull_margin = 10.0
 	_init_post_xr()
@@ -842,6 +843,7 @@ func _init_post_xr():
 
 	ui_visible = false
 	_set_ui_visible(false)
+	_ui_has_saved_offset = false
 
 func _init_textures_and_ui():
 	var saved_ip = ""
@@ -992,10 +994,16 @@ func _process_button_input():
 			if virtual_keyboard:
 				virtual_keyboard.thumbstick_exit_flag = false
 		_was_r_stick_click = r_stick_click
-	if _startup_reposition:
-		if xr_camera.global_position.length_squared() > 0.01:
-			_reposition_screen_and_ui()
-			_startup_reposition = false
+	if _startup_reposition >= 0 and is_xr_active:
+		match _startup_reposition:
+			0:  # Waiting for tracking to produce a meaningful camera position
+				if xr_camera.global_position.length_squared() > 0.01:
+					_startup_reposition = 1
+			1:  # Wait one more frame for tracking to stabilize
+				_startup_reposition = 2
+			2:  # Position screen in front of user
+				_reposition_screen_and_ui(true)
+				_startup_reposition = -1
 
 func _process_input_release():
 	if Input.is_action_just_pressed("ui_focus_next"):
@@ -1076,23 +1084,43 @@ func _input(event):
 
 func _toggle_ui():
 	ui_visible = not ui_visible
-	_set_ui_visible(ui_visible)
 	if ui_visible:
 		if state_manager:
 			state_manager.sync_ui_to_settings()
-		if comp_ui:
-			comp_ui.visible = true
-			comp_ui.global_position = ui_panel_3d.global_position
-			comp_ui.global_rotation = ui_panel_3d.global_rotation
+		_set_ui_position()
 		if comp.in_use:
-			_make_ui_transparent()
+			if comp_ui:
+				comp_ui.visible = true
+				comp_ui.global_position = ui_panel_3d.global_position
+				comp_ui.global_rotation = ui_panel_3d.global_rotation
+			ui_panel_3d.visible = false
+			if bezel_enabled:
+				comp_bezel_rect.color = Color(0, 0, 0, 0)
+				if comp_bezel_rect_left:
+					comp_bezel_rect_left.color = Color(0, 0, 0, 0)
+				if comp_bezel_rect_right:
+					comp_bezel_rect_right.color = Color(0, 0, 0, 0)
 		else:
+			ui_panel_3d.visible = true
 			var ui_tex = ui_viewport.get_texture()
 			ui_panel_3d.material_override.albedo_texture = ui_tex
+		var area = ui_panel_3d.get_node_or_null("Area3D")
+		if area:
+			area.process_mode = Node.PROCESS_MODE_INHERIT
 	else:
 		if comp_ui:
 			comp_ui.visible = false
-		_restore_ui_material()
+		_save_ui_offset()
+		ui_panel_3d.visible = false
+		var area = ui_panel_3d.get_node_or_null("Area3D")
+		if area:
+			area.process_mode = Node.PROCESS_MODE_DISABLED
+		if comp.in_use and bezel_enabled:
+			comp_bezel_rect.color = Color(0, 0, 0, 1)
+			if comp_bezel_rect_left:
+				comp_bezel_rect_left.color = Color(0, 0, 0, 1)
+			if comp_bezel_rect_right:
+				comp_bezel_rect_right.color = Color(0, 0, 0, 1)
 	ui_controller.set_disconnect_visible(is_streaming)
 
 var _ui_saved_offset: Vector3 = Vector3.ZERO
@@ -1100,32 +1128,49 @@ var _ui_saved_rot_y: float = 0.0
 var _ui_saved_rot_x: float = 0.0
 var _ui_has_saved_offset: bool = false
 
+func _set_ui_position():
+	if not is_xr_active:
+		return
+	if _ui_has_saved_offset:
+		ui_panel_3d.global_position = screen_mesh.global_position + screen_mesh.global_transform.basis * _ui_saved_offset
+		ui_panel_3d.rotation.y = screen_mesh.global_rotation.y + _ui_saved_rot_y
+		ui_panel_3d.rotation.x = _ui_saved_rot_x
+	else:
+		var offset = Vector3(-1.0, -0.5, 0.8)
+		ui_panel_3d.global_position = screen_mesh.global_position + screen_mesh.global_transform.basis * offset
+		var cam_pos = xr_camera.global_position
+		var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
+		ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
+		ui_panel_3d.rotation.x = -0.15
+		_save_ui_offset()
+
+func _save_ui_offset():
+	var scr_basis = screen_mesh.global_transform.basis.inverse()
+	_ui_saved_offset = scr_basis * (ui_panel_3d.global_position - screen_mesh.global_position)
+	_ui_saved_rot_y = ui_panel_3d.rotation.y - screen_mesh.global_rotation.y
+	_ui_saved_rot_x = ui_panel_3d.rotation.x
+	_ui_has_saved_offset = true
+
 func _set_ui_visible(vis: bool):
 	ui_panel_3d.visible = vis
 	var area = ui_panel_3d.get_node_or_null("Area3D")
 	if area:
 		area.process_mode = Node.PROCESS_MODE_INHERIT if vis else Node.PROCESS_MODE_DISABLED
 	if is_xr_active and vis:
-		var cam_pos = xr_camera.global_position
 		if _ui_has_saved_offset:
 			ui_panel_3d.global_position = screen_mesh.global_position + screen_mesh.global_transform.basis * _ui_saved_offset
 			ui_panel_3d.rotation.y = screen_mesh.global_rotation.y + _ui_saved_rot_y
 			ui_panel_3d.rotation.x = _ui_saved_rot_x
 		else:
-			var cam_fwd = -xr_camera.global_transform.basis.z
-			var cam_right = xr_camera.global_transform.basis.x
-			var cam_up = xr_camera.global_transform.basis.y
-			ui_panel_3d.global_position = cam_pos + cam_fwd * 0.8 - cam_right * 0.8 - cam_up * 0.2
+			var offset = Vector3(-1.0, -0.5, 0.8)
+			ui_panel_3d.global_position = screen_mesh.global_position + screen_mesh.global_transform.basis * offset
+			var cam_pos = xr_camera.global_position
 			var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
 			ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
-			ui_panel_3d.rotation.x = -0.26
-			_ui_has_saved_offset = true
+			ui_panel_3d.rotation.x = -0.15
+			_save_ui_offset()
 	elif is_xr_active:
-		var scr_basis = screen_mesh.global_transform.basis.inverse()
-		_ui_saved_offset = scr_basis * (ui_panel_3d.global_position - screen_mesh.global_position)
-		_ui_saved_rot_y = ui_panel_3d.rotation.y - screen_mesh.global_rotation.y
-		_ui_saved_rot_x = ui_panel_3d.rotation.x
-		_ui_has_saved_offset = true
+		_save_ui_offset()
 
 func _trigger_haptic(_controller: int, low_freq: int, high_freq: int):
 	var strength = clampf((low_freq + high_freq) / 510.0, 0.0, 1.0)
@@ -1136,16 +1181,17 @@ func _trigger_haptic(_controller: int, low_freq: int, high_freq: int):
 	if left_hand:
 		left_hand.trigger_haptic_pulse("haptic", strength, 0.05)
 
-func _reposition_screen_and_ui():
+func _reposition_screen_and_ui(use_cam_yaw: bool = true):
 	if not is_xr_active:
 		return
 	var cam_pos = xr_camera.global_position
 	var cam_fwd = -xr_camera.global_transform.basis.z
-	var cam_right = xr_camera.global_transform.basis.x
-	var cam_yaw = atan2(-cam_fwd.x, -cam_fwd.z)
-	screen_mesh.global_position = cam_pos + cam_fwd * 1.8
+	cam_fwd.y = 0.0
+	cam_fwd = cam_fwd.normalized()
+	screen_mesh.global_position = cam_pos + cam_fwd * 2.16
 	screen_mesh.rotation = Vector3.ZERO
-	screen_mesh.rotation.y = cam_yaw
+	if use_cam_yaw:
+		screen_mesh.rotation.y = atan2(-cam_fwd.x, -cam_fwd.z)
 	if (comp_cylinder and comp_cylinder.visible) or (comp_cylinder_left and comp_cylinder_left.visible):
 		_update_cylinder_params()
 	_log("[POS] Screen at %s, Cam at %s" % [str(screen_mesh.global_position), str(cam_pos)])

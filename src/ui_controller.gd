@@ -18,7 +18,7 @@ func setup_numpad():
 	for key in keys:
 		var btn = Button.new()
 		btn.text = key
-		btn.custom_minimum_size = Vector2(60, 35)
+		btn.custom_minimum_size = Vector2(120, 70)
 		btn.size_flags_stretch_ratio = 1.0
 		btn.pressed.connect(on_numpad_key.bind(key))
 		main.get_node("%Numpad").add_child(btn)
@@ -67,12 +67,12 @@ func switch_tab(tab: int):
 	if _tab_control: _tab_control.visible = (tab == 2)
 	var tab_active_style = StyleBoxFlat.new()
 	tab_active_style.bg_color = Color(1, 1, 1, 0.12)
-	tab_active_style.set_corner_radius_all(8)
-	tab_active_style.set_content_margin_all(6)
+	tab_active_style.set_corner_radius_all(16)
+	tab_active_style.set_content_margin_all(12)
 	var tab_inactive_style = StyleBoxFlat.new()
 	tab_inactive_style.bg_color = Color(1, 1, 1, 0.04)
-	tab_inactive_style.set_corner_radius_all(8)
-	tab_inactive_style.set_content_margin_all(6)
+	tab_inactive_style.set_corner_radius_all(16)
+	tab_inactive_style.set_content_margin_all(12)
 	_tab_btn_display.add_theme_stylebox_override("normal", tab_active_style if tab == 0 else tab_inactive_style)
 	_tab_btn_display.add_theme_stylebox_override("hover", tab_active_style)
 	_tab_btn_stream.add_theme_stylebox_override("normal", tab_active_style if tab == 1 else tab_inactive_style)
@@ -98,17 +98,17 @@ func build_ui():
 
 	main._btn_style = StyleBoxFlat.new()
 	main._btn_style.bg_color = Color(1, 1, 1, 0.06)
-	main._btn_style.set_corner_radius_all(10)
-	main._btn_style.set_content_margin_all(8)
+	main._btn_style.set_corner_radius_all(20)
+	main._btn_style.set_content_margin_all(16)
 
 	main._btn_hover = StyleBoxFlat.new()
 	main._btn_hover.bg_color = Color(1, 1, 1, 0.12)
-	main._btn_hover.set_corner_radius_all(10)
-	main._btn_hover.set_content_margin_all(8)
+	main._btn_hover.set_corner_radius_all(20)
+	main._btn_hover.set_content_margin_all(16)
 
 	var panel_bg = StyleBoxFlat.new()
 	panel_bg.bg_color = Color(0.06, 0.06, 0.1, 0.92)
-	panel_bg.set_corner_radius_all(16)
+	panel_bg.set_corner_radius_all(32)
 	panel_bg.set_content_margin_all(0)
 
 	var panel = PanelContainer.new()
@@ -121,7 +121,7 @@ func build_ui():
 	var brand = Label.new()
 	brand.name = "Brand"
 	brand.text = "Nightfall"
-	brand.add_theme_font_size_override("font_size", 15)
+	brand.add_theme_font_size_override("font_size", 30)
 	brand.add_theme_color_override("font_color", Color(1, 1, 1, 1))
 	brand.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -150,8 +150,8 @@ func build_ui():
 	main._ui_center_btn = Button.new()
 	main._ui_center_btn.text = "\u25C9"
 	main._ui_center_btn.focus_mode = Control.FOCUS_NONE
-	main._ui_center_btn.custom_minimum_size = Vector2(30, 18)
-	main._ui_center_btn.add_theme_font_size_override("font_size", 11)
+	main._ui_center_btn.custom_minimum_size = Vector2(60, 36)
+	main._ui_center_btn.add_theme_font_size_override("font_size", 22)
 	main._ui_center_btn.add_theme_color_override("font_color", Color(0.5, 0.7, 1.0, 0.6))
 	main._ui_center_btn.add_theme_color_override("font_hover_color", Color(0.6, 0.8, 1.0, 1.0))
 	var center_style = main._btn_style.duplicate()
@@ -160,7 +160,7 @@ func build_ui():
 	center_style.content_margin_top = 2
 	center_style.content_margin_bottom = 2
 	center_style.set_corner_radius_all(0)
-	center_style.set_corner_radius(CORNER_TOP_LEFT, 10)
+	center_style.set_corner_radius(CORNER_TOP_LEFT, 32)
 	var center_hover = main._btn_hover.duplicate()
 	center_hover.content_margin_left = 10
 	center_hover.content_margin_right = 10
@@ -168,7 +168,7 @@ func build_ui():
 	center_hover.content_margin_bottom = 2
 	center_hover.bg_color = Color(0.2, 0.5, 0.86, 0.3)
 	center_hover.set_corner_radius_all(0)
-	center_hover.set_corner_radius(CORNER_TOP_LEFT, 10)
+	center_hover.set_corner_radius(CORNER_TOP_LEFT, 32)
 	main._ui_center_btn.add_theme_stylebox_override("normal", center_style)
 	main._ui_center_btn.add_theme_stylebox_override("hover", center_hover)
 	main._ui_center_btn.add_theme_stylebox_override("pressed", center_hover)
@@ -176,14 +176,14 @@ func build_ui():
 
 	main._ui_host_label = Label.new()
 	main._ui_host_label.name = "HostLabel"
-	main._ui_host_label.add_theme_font_size_override("font_size", 13)
+	main._ui_host_label.add_theme_font_size_override("font_size", 26)
 	main._ui_host_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
-	main._ui_host_label.custom_minimum_size = Vector2(0, 30)
+	main._ui_host_label.custom_minimum_size = Vector2(0, 60)
 	main._ui_host_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	main._ui_host_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var host_pad = Control.new()
-	host_pad.custom_minimum_size = Vector2(12, 0)
+	host_pad.custom_minimum_size = Vector2(24, 0)
 	host_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_row.add_child(host_pad)
 	top_row.add_child(main._ui_host_label)
@@ -201,8 +201,8 @@ func build_ui():
 	main._ui_exit_btn = Button.new()
 	main._ui_exit_btn.text = "Exit"
 	main._ui_exit_btn.focus_mode = Control.FOCUS_NONE
-	main._ui_exit_btn.custom_minimum_size = Vector2(50, 18)
-	main._ui_exit_btn.add_theme_font_size_override("font_size", 11)
+	main._ui_exit_btn.custom_minimum_size = Vector2(100, 36)
+	main._ui_exit_btn.add_theme_font_size_override("font_size", 22)
 	main._ui_exit_btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	main._ui_exit_btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
 	var exit_style = main._btn_style.duplicate()
@@ -211,14 +211,14 @@ func build_ui():
 	exit_style.content_margin_top = 2
 	exit_style.content_margin_bottom = 2
 	exit_style.set_corner_radius_all(0)
-	exit_style.set_corner_radius(CORNER_BOTTOM_LEFT, 10)
+	exit_style.set_corner_radius(CORNER_BOTTOM_LEFT, 32)
 	var exit_hover = main._btn_hover.duplicate()
 	exit_hover.content_margin_left = 14
 	exit_hover.content_margin_right = 14
 	exit_hover.content_margin_top = 2
 	exit_hover.content_margin_bottom = 2
 	exit_hover.set_corner_radius_all(0)
-	exit_hover.set_corner_radius(CORNER_BOTTOM_LEFT, 10)
+	exit_hover.set_corner_radius(CORNER_BOTTOM_LEFT, 32)
 	main._ui_exit_btn.add_theme_stylebox_override("normal", exit_style)
 	main._ui_exit_btn.add_theme_stylebox_override("hover", exit_hover)
 	main._ui_exit_btn.add_theme_stylebox_override("pressed", exit_hover)
@@ -227,8 +227,8 @@ func build_ui():
 	main._ui_disconnect_btn = Button.new()
 	main._ui_disconnect_btn.text = "Disconnect"
 	main._ui_disconnect_btn.focus_mode = Control.FOCUS_NONE
-	main._ui_disconnect_btn.custom_minimum_size = Vector2(70, 18)
-	main._ui_disconnect_btn.add_theme_font_size_override("font_size", 11)
+	main._ui_disconnect_btn.custom_minimum_size = Vector2(140, 36)
+	main._ui_disconnect_btn.add_theme_font_size_override("font_size", 22)
 	main._ui_disconnect_btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	main._ui_disconnect_btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
 	var disc_style = main._btn_style.duplicate()
@@ -252,8 +252,8 @@ func build_ui():
 	main._ui_close_btn = Button.new()
 	main._ui_close_btn.text = "\u2715"
 	main._ui_close_btn.focus_mode = Control.FOCUS_NONE
-	main._ui_close_btn.custom_minimum_size = Vector2(30, 18)
-	main._ui_close_btn.add_theme_font_size_override("font_size", 11)
+	main._ui_close_btn.custom_minimum_size = Vector2(60, 36)
+	main._ui_close_btn.add_theme_font_size_override("font_size", 22)
 	main._ui_close_btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	main._ui_close_btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
 	var close_style = main._btn_style.duplicate()
@@ -262,7 +262,7 @@ func build_ui():
 	close_style.content_margin_top = 2
 	close_style.content_margin_bottom = 2
 	close_style.set_corner_radius_all(0)
-	close_style.set_corner_radius(CORNER_TOP_RIGHT, 10)
+	close_style.set_corner_radius(CORNER_TOP_RIGHT, 32)
 	var close_hover = main._btn_hover.duplicate()
 	close_hover.content_margin_left = 10
 	close_hover.content_margin_right = 10
@@ -270,14 +270,14 @@ func build_ui():
 	close_hover.content_margin_bottom = 2
 	close_hover.bg_color = Color(0.86, 0.2, 0.2, 0.3)
 	close_hover.set_corner_radius_all(0)
-	close_hover.set_corner_radius(CORNER_TOP_RIGHT, 10)
+	close_hover.set_corner_radius(CORNER_TOP_RIGHT, 32)
 	main._ui_close_btn.add_theme_stylebox_override("normal", close_style)
 	main._ui_close_btn.add_theme_stylebox_override("hover", close_hover)
 	main._ui_close_btn.add_theme_stylebox_override("pressed", close_hover)
 	top_row.add_child(main._ui_close_btn)
 
 	var top_margin = Control.new()
-	top_margin.custom_minimum_size = Vector2(0, 22)
+	top_margin.custom_minimum_size = Vector2(0, 44)
 	top_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(top_margin)
 
@@ -291,29 +291,29 @@ func build_ui():
 	_tab_btn_display = Button.new()
 	_tab_btn_display.text = "Display"
 	_tab_btn_display.focus_mode = Control.FOCUS_NONE
-	_tab_btn_display.custom_minimum_size = Vector2(80, 22)
-	_tab_btn_display.add_theme_font_size_override("font_size", 11)
+	_tab_btn_display.custom_minimum_size = Vector2(160, 44)
+	_tab_btn_display.add_theme_font_size_override("font_size", 22)
 	_tab_btn_display.add_theme_color_override("font_color", Color(1, 1, 1, 1.0))
 	tab_bar.add_child(_tab_btn_display)
 
 	_tab_btn_stream = Button.new()
 	_tab_btn_stream.text = "Stream"
 	_tab_btn_stream.focus_mode = Control.FOCUS_NONE
-	_tab_btn_stream.custom_minimum_size = Vector2(80, 22)
-	_tab_btn_stream.add_theme_font_size_override("font_size", 11)
+	_tab_btn_stream.custom_minimum_size = Vector2(160, 44)
+	_tab_btn_stream.add_theme_font_size_override("font_size", 22)
 	_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	tab_bar.add_child(_tab_btn_stream)
 
 	_tab_btn_control = Button.new()
 	_tab_btn_control.text = "Control"
 	_tab_btn_control.focus_mode = Control.FOCUS_NONE
-	_tab_btn_control.custom_minimum_size = Vector2(80, 22)
-	_tab_btn_control.add_theme_font_size_override("font_size", 11)
+	_tab_btn_control.custom_minimum_size = Vector2(160, 44)
+	_tab_btn_control.add_theme_font_size_override("font_size", 22)
 	_tab_btn_control.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	tab_bar.add_child(_tab_btn_control)
 
 	var tab_margin = Control.new()
-	tab_margin.custom_minimum_size = Vector2(0, 6)
+	tab_margin.custom_minimum_size = Vector2(0, 12)
 	tab_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(tab_margin)
 
@@ -340,7 +340,7 @@ func build_ui():
 	disp_row1.add_child(main._ui_3d_btn)
 
 	var disp_gap1 = Control.new()
-	disp_gap1.custom_minimum_size = Vector2(0, 10)
+	disp_gap1.custom_minimum_size = Vector2(0, 20)
 	disp_gap1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_display.add_child(disp_gap1)
 
@@ -384,7 +384,7 @@ func build_ui():
 	stream_row1.add_child(main._ui_bitrate_btn)
 
 	var stream_gap1 = Control.new()
-	stream_gap1.custom_minimum_size = Vector2(0, 10)
+	stream_gap1.custom_minimum_size = Vector2(0, 20)
 	stream_gap1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_stream.add_child(stream_gap1)
 
@@ -430,7 +430,7 @@ func build_ui():
 	control_row1.add_child(main._ui_hand_tracking_btn)
 
 	var control_gap1 = Control.new()
-	control_gap1.custom_minimum_size = Vector2(0, 10)
+	control_gap1.custom_minimum_size = Vector2(0, 20)
 	control_gap1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_control.add_child(control_gap1)
 
@@ -453,16 +453,16 @@ func build_ui():
 	main._ui_status_label = Label.new()
 	main._ui_status_label.name = "StatusLabel"
 	main._ui_status_label.text = "Ready"
-	main._ui_status_label.add_theme_font_size_override("font_size", 11)
+	main._ui_status_label.add_theme_font_size_override("font_size", 22)
 	main._ui_status_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
 	main._ui_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	main._ui_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	main._ui_status_label.custom_minimum_size = Vector2(0, 28)
+	main._ui_status_label.custom_minimum_size = Vector2(0, 56)
 	main._ui_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(main._ui_status_label)
 
 	var grab_gap = Control.new()
-	grab_gap.custom_minimum_size = Vector2(0, 8)
+	grab_gap.custom_minimum_size = Vector2(0, 16)
 	grab_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(grab_gap)
 
@@ -478,12 +478,12 @@ func build_ui():
 
 	var grab_bar = PanelContainer.new()
 	grab_bar.name = "CompGrabBar"
-	grab_bar.custom_minimum_size = Vector2(0, 12)
+	grab_bar.custom_minimum_size = Vector2(0, 24)
 	grab_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grab_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var grab_style = StyleBoxFlat.new()
 	grab_style.bg_color = Color(1, 1, 1, 0.08)
-	grab_style.set_corner_radius_all(7)
+	grab_style.set_corner_radius_all(14)
 	grab_bar.add_theme_stylebox_override("panel", grab_style)
 	grab_bar_center.add_child(grab_bar)
 
@@ -493,7 +493,7 @@ func build_ui():
 	grab_bar_center.add_child(grab_right_spacer)
 
 	var bottom_margin = Control.new()
-	bottom_margin.custom_minimum_size = Vector2(0, 16)
+	bottom_margin.custom_minimum_size = Vector2(0, 32)
 	bottom_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(bottom_margin)
 
@@ -533,7 +533,7 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	var btn = Button.new()
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.text = label_text + "\n" + value_text
-	btn.add_theme_font_size_override("font_size", 13)
+	btn.add_theme_font_size_override("font_size", 26)
 	btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
 	btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
 	btn.add_theme_stylebox_override("normal", main._btn_style)
@@ -541,7 +541,7 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	var pressed_style = main._btn_hover.duplicate()
 	pressed_style.bg_color = Color(1, 1, 1, 0.18)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
-	btn.custom_minimum_size = Vector2(125, 66)
+	btn.custom_minimum_size = Vector2(250, 132)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return btn
 
@@ -594,21 +594,21 @@ func make_indicator_btn(label_text: String, value_text: String) -> Button:
 	var btn = Button.new()
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.text = label_text + ": " + value_text
-	btn.add_theme_font_size_override("font_size", 10)
+	btn.add_theme_font_size_override("font_size", 20)
 	btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
 	btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 0.7))
 	var ind_style = StyleBoxFlat.new()
 	ind_style.bg_color = Color(1, 1, 1, 0.0)
-	ind_style.set_corner_radius_all(6)
-	ind_style.set_content_margin_all(4)
+	ind_style.set_corner_radius_all(12)
+	ind_style.set_content_margin_all(8)
 	btn.add_theme_stylebox_override("normal", ind_style)
 	var ind_hover = StyleBoxFlat.new()
 	ind_hover.bg_color = Color(1, 1, 1, 0.06)
-	ind_hover.set_corner_radius_all(6)
-	ind_hover.set_content_margin_all(4)
+	ind_hover.set_corner_radius_all(12)
+	ind_hover.set_content_margin_all(8)
 	btn.add_theme_stylebox_override("hover", ind_hover)
 	btn.add_theme_stylebox_override("pressed", ind_hover)
-	btn.custom_minimum_size = Vector2(70, 18)
+	btn.custom_minimum_size = Vector2(140, 36)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return btn
 

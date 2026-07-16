@@ -8,8 +8,6 @@ func _init(owner: Node3D):
 
 func save_state():
 	var save = ConfigFile.new()
-	save.set_value("screen", "size_x", main._mesh_size.x)
-	save.set_value("screen", "size_y", main._mesh_size.y)
 	save.set_value("screen", "bezel", main.bezel_enabled)
 	save.set_value("screen", "curvature", main.curvature)
 	save.set_value("screen", "passthrough", main.passthrough_mode)
@@ -153,13 +151,7 @@ func load_state():
 		main.controller_mapper.btn_toggle = clampi(save.get_value("controller", "btn_toggle", 0), 0, 2)
 		if main.ui_controller:
 			main.ui_controller.update_btn_toggle_btn()
-	if save.has_section_key("screen", "size_x"):
-		main._mesh_size = Vector2(save.get_value("screen", "size_x"), save.get_value("screen", "size_y"))
-		if main._mesh_size.x > 0.1 and main._mesh_size.y > 0.1:
-			main.screen_manager.apply_curvature()
-			main.screen_manager.update_corner_positions()
-	else:
-		main.screen_manager.apply_curvature()
+	main.screen_manager.apply_curvature()
 	main.auto_reconnect_enabled = save.get_value("stream", "auto_reconnect", true)
 	main.idle_timeout_min = save.get_value("stream", "idle_timeout_min", 0)
 	main.pipewire_restore_token = save.get_value("local_capture", "restore_token", "")

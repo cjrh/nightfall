@@ -619,6 +619,7 @@ func switch_to_mesh_rendering():
 	restore_ui_material()
 	restore_kb_material()
 	main.bezel_mesh.visible = main.bezel_enabled
+	update_bezel()
 	if main.is_streaming:
 		main.stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		var mat = main.screen_mesh.material_override

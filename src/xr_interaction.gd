@@ -152,23 +152,26 @@ func handle_pointer_interaction():
 
 	main.get_node("%ScreenGrabBar").visible = true
 	for ch in main.corner_handles:
-		ch.visible = true
+		ch.visible = false
+
+	if main.grabbed_corner_idx >= 0:
+		main.corner_handles[main.grabbed_corner_idx].visible = true
 
 	if not main.grabbed_node and main.grabbed_corner_idx < 0:
-		_set_grab_bar_color(main.get_node("%ScreenGrabBar"), Color.WHITE, 0.01)
+		_set_grab_bar_color(main.get_node("%ScreenGrabBar"), Color.WHITE, 0.05)
 		main.set_comp_grab_bar_color(main.ui_viewport, Color(1, 1, 1, 0.08))
 		if main.virtual_keyboard and main.virtual_keyboard.visible:
 			main.set_comp_grab_bar_color(main.virtual_keyboard.viewport, Color(1, 1, 1, 0.08))
 		for ch in main.corner_handles:
-			_set_corner_color(ch, Color.WHITE, 0.0)
+			_set_corner_color(ch, Color.WHITE, 0.05)
 	elif main.grabbed_node and main.grabbed_bar:
-		_set_grab_bar_color(main.grabbed_bar, Color.WHITE, 0.3)
+		_set_grab_bar_color(main.grabbed_bar, Color.WHITE, 0.4)
 	elif main.grabbed_node == main.ui_panel_3d:
 		main.set_comp_grab_bar_color(main.ui_viewport, Color(1, 1, 1, 0.8))
 	elif main.grabbed_node == main.virtual_keyboard:
 		main.set_comp_grab_bar_color(main.virtual_keyboard.viewport, Color(1, 1, 1, 0.8))
 	elif main.grabbed_corner_idx >= 0:
-		_set_corner_color(main.corner_handles[main.grabbed_corner_idx], Color.WHITE, 0.3)
+		_set_corner_color(main.corner_handles[main.grabbed_corner_idx], Color.WHITE, 0.4)
 
 	var right_laser = main.get_node("%Laser")
 	var left_laser = null
@@ -253,7 +256,7 @@ func handle_pointer_interaction():
 			pointer_on_ui = true
 
 		if parent == main.get_node("%ScreenGrabBar") and parent != main.grabbed_bar:
-			_set_grab_bar_color(parent, Color.WHITE, 0.1)
+			_set_grab_bar_color(parent, Color.WHITE, 0.15)
 
 		is_now_clicking = _is_now_clicking()
 
@@ -422,15 +425,16 @@ func handle_pointer_interaction():
 
 		var corner_idx = _get_corner_index(parent)
 		if corner_idx >= 0:
+			parent.visible = true
 			if is_now_clicking and main.grabbed_corner_idx < 0 and not main.grabbed_node:
 				main.grabbed_corner_idx = corner_idx
 				var opposite_idx = 3 - corner_idx
 				var opposite = main.corner_handles[opposite_idx]
 				main.corner_anchor_world = opposite.global_position
-				_set_corner_color(parent, Color.WHITE, 0.3)
+				_set_corner_color(parent, Color.WHITE, 0.4)
 				main.was_clicking = true
 			elif main.grabbed_corner_idx < 0 and corner_idx != main.grabbed_corner_idx:
-				_set_corner_color(parent, Color.WHITE, 0.1)
+				_set_corner_color(parent, Color.WHITE, 0.15)
 			return
 
 		elif parent == main.get_node("%ScreenGrabBar"):
@@ -577,7 +581,7 @@ func handle_corner_resize():
 	var still_clicking = _is_now_clicking()
 	if not still_clicking:
 		var handle = main.corner_handles[main.grabbed_corner_idx]
-		_set_corner_color(handle, Color.WHITE, 0.01)
+		_set_corner_color(handle, Color.WHITE, 0.05)
 		main.grabbed_corner_idx = -1
 		main.state_manager.save_state()
 
@@ -601,6 +605,8 @@ func _set_grab_bar_color(bar: MeshInstance3D, color: Color, alpha: float = 1.0):
 
 func _set_corner_color(handle: MeshInstance3D, color: Color, alpha: float = 1.0):
 	var c = Color(color.r, color.g, color.b, alpha)
+	if handle.material_override:
+		handle.material_override.albedo_color = c
 	for child in handle.get_children():
 		if child is MeshInstance3D:
 			child.material_override.albedo_color = c
