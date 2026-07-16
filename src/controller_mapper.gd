@@ -4,7 +4,7 @@ extends Node
 enum CtrlType { GAMEPAD, KEYBOARD, KBMOUSE }
 enum BtnToggle { HEAD, TILT, NONE }
 
-var btn_toggle: int = BtnToggle.HEAD
+var btn_toggle: int = BtnToggle.TILT
 var btn_toggle_labels: Array = ["Head", "Tilt", "None"]
 
 var main: Node3D

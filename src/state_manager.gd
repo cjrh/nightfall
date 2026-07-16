@@ -148,7 +148,7 @@ func load_state():
 		if main.ui_controller:
 			main.ui_controller.update_ctrl_mode_btn()
 			main.ui_controller.update_ctrl_type_btn()
-		main.controller_mapper.btn_toggle = clampi(save.get_value("controller", "btn_toggle", 0), 0, 2)
+		main.controller_mapper.btn_toggle = clampi(save.get_value("controller", "btn_toggle", 1), 0, 2)
 		if main.ui_controller:
 			main.ui_controller.update_btn_toggle_btn()
 	main.screen_manager.apply_curvature()
