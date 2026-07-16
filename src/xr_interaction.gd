@@ -538,7 +538,7 @@ func handle_corner_resize():
 	if main.curvature == 0:
 		raw_w = absf(local_hit.x) * 2.0
 	else:
-		var radius = 10.0 if main.curvature == 1 else 4.0
+		var radius = main.screen_manager._get_cylinder_radius()
 		var a = asin(clampf(local_hit.x / radius, -1.0, 1.0))
 		raw_w = absf(a) * radius * 2.0
 	var new_w = maxf(raw_w, 0.6)

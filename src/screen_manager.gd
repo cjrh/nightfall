@@ -6,6 +6,21 @@ var main: Node3D
 func _init(owner: Node3D):
 	main = owner
 
+func _get_cylinder_radius() -> float:
+	if main.comp.in_use:
+		var cam_to_screen = main.screen_mesh.global_position - main.xr_camera.global_position
+		var view_dist = cam_to_screen.length()
+		if view_dist < 0.5:
+			view_dist = 3.0
+		if main.curvature == 1:
+			return view_dist * 3.0
+		elif main.curvature == 2:
+			return view_dist * 2.0
+		else:
+			return view_dist * 100.0
+	else:
+		return 1000.0 if main.curvature == 0 else (10.0 if main.curvature == 1 else 4.0)
+
 func create_corner_handles():
 	var offsets = [
 		Vector2(-0.5, 0.5),
@@ -47,7 +62,7 @@ func create_corner_handles():
 
 func update_corner_positions():
 	var mesh_size = main._mesh_size
-	var radius = 1000.0 if main.curvature == 0 else (10.0 if main.curvature == 1 else 4.0)
+	var radius = _get_cylinder_radius()
 	var half_angle = mesh_size.x / radius * 0.5
 	var edge_x = sin(half_angle) * radius
 	var edge_z = -(cos(half_angle) * radius - radius)
@@ -117,7 +132,7 @@ func update_bezel_size():
 		main.bezel_mesh.mesh = bezel_quad
 		main.bezel_mesh.position = Vector3(0, 0, -0.005)
 	else:
-		var radius = 10.0 if main.curvature == 1 else 4.0
+		var radius = _get_cylinder_radius()
 		var subdivide = 32
 		var v_subdivide = 16
 		var angle = bezel_size.x / radius
@@ -200,7 +215,7 @@ func apply_curvature():
 		return
 	var subdivide = 32
 	var v_subdivide = 16
-	var radius = 10.0 if main.curvature == 1 else 4.0
+	var radius = _get_cylinder_radius()
 	var angle = mesh_size.x / radius
 	var verts = PackedVector3Array()
 	var uvs = PackedVector2Array()

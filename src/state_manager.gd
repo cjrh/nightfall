@@ -85,7 +85,7 @@ func load_host_state(ip: String):
 
 func sync_ui_to_settings():
 	if main.bezel_mesh:
-		main.bezel_mesh.visible = main.bezel_enabled
+		main.bezel_mesh.visible = main.bezel_enabled and not main.comp.in_use
 	if main.ui_controller:
 		main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
 		main.ui_controller.update_option_btn(main._ui_hand_tracking_btn, main.tracking_labels[clampi(main.tracking_mode, 0, main.tracking_labels.size() - 1)])
