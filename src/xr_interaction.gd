@@ -8,6 +8,9 @@ var _active_hand: String = "right"
 var _pinch_start_time: float = 0.0
 var _pinch_start_pos: Vector2 = Vector2.ZERO
 var _click_pending_release: bool = false
+var _corner_resize_started: bool = false
+var _corner_start_width: float = 0.0
+var _corner_start_hit_x: float = 0.0
 
 func _init(owner: Node3D):
 	main = owner
@@ -532,16 +535,26 @@ func handle_corner_resize():
 
 	var local_hit = main.screen_mesh.to_local(hit_world)
 
+	if not _corner_resize_started:
+		_corner_resize_started = true
+		_corner_start_width = main._mesh_size.x
+		_corner_start_hit_x = local_hit.x
+		return
+
 	var sv = main.stream_viewport.size
 	var aspect = float(sv.x) / float(sv.y) if sv.y > 0 else 16.0 / 9.0
-	var raw_w = 0.0
+	var sign = -1.0 if main.grabbed_corner_idx in [0, 2] else 1.0
+	var new_w: float
 	if main.curvature == 0:
-		raw_w = absf(local_hit.x) * 2.0
+		var dx = local_hit.x - _corner_start_hit_x
+		new_w = _corner_start_width + dx * sign * 2.0
 	else:
 		var radius = main.screen_manager._get_cylinder_radius()
-		var a = asin(clampf(local_hit.x / radius, -1.0, 1.0))
-		raw_w = absf(a) * radius * 2.0
-	var new_w = maxf(raw_w, 0.6)
+		var start_a = asin(clampf(_corner_start_hit_x / radius, -1.0, 1.0))
+		var cur_a = asin(clampf(local_hit.x / radius, -1.0, 1.0))
+		var da = cur_a - start_a
+		new_w = _corner_start_width + da * radius * sign * 2.0
+	new_w = maxf(new_w, 0.6)
 	var new_h = new_w / aspect
 	if new_h < 0.4:
 		new_h = 0.4
@@ -583,6 +596,7 @@ func handle_corner_resize():
 		var handle = main.corner_handles[main.grabbed_corner_idx]
 		_set_corner_color(handle, Color.WHITE, 0.05)
 		main.grabbed_corner_idx = -1
+		_corner_resize_started = false
 		main.state_manager.save_state()
 
 func _get_corner_index(node: Node) -> int:
