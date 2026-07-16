@@ -53,7 +53,7 @@ func create_corner_handles():
 		var col = BoxShape3D.new()
 		col.size = Vector3(col_size, col_size, 0.1)
 		shape.shape = col
-		shape.position = Vector3(0, 0, 0.06)
+		shape.position = Vector3(offsets[i].x * col_size, offsets[i].y * col_size, 0)
 		area.add_child(shape)
 		handle.add_child(area)
 		handle.position = Vector3(offsets[i].x * (mesh_size.x + corner_size), offsets[i].y * (mesh_size.y + corner_size), 0)
@@ -84,6 +84,7 @@ func update_corner_positions():
 				for c in child.get_children():
 					if c is CollisionShape3D and c.shape is BoxShape3D:
 						c.shape.size = Vector3(col_size, col_size, 0.1)
+						c.position = Vector3(offsets[i].x * col_size, offsets[i].y * col_size, 0)
 		var cy = offsets[i].y * (mesh_size.y + corner_size)
 		var a = half_angle if offsets[i].x > 0 else -half_angle
 		var cx = edge_x if offsets[i].x > 0 else -edge_x
