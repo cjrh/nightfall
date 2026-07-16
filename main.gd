@@ -68,7 +68,6 @@ var _was_a_pressed: bool = false
 var _was_r_stick_click: bool = false
 var _startup_reposition: int = 0  # 0=waiting for tracking, 1=centered, 2=positioning
 var _startup_cover: MeshInstance3D
-var _startup_cover_countdown: int = 0
 var _startup_ready: bool = false
 
 var _is_using_hands: bool = false
@@ -633,8 +632,7 @@ func _ready():
 	cov_mat.render_priority = 127
 	_startup_cover.material_override = cov_mat
 	xr_camera.add_child(_startup_cover)
-	_startup_cover_countdown = 180
-	_log("[COVER] Startup cover active, countdown=%d" % _startup_cover_countdown)
+	_log("[COVER] Startup cover active")
 
 	if OS.get_name() == "Android":
 		OS.set_environment("CURL_CA_BUNDLE", "/system/etc/security/cacerts/")
