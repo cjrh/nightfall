@@ -10,7 +10,8 @@ func save_state():
 	var save = ConfigFile.new()
 	save.set_value("screen", "bezel", main.bezel_enabled)
 	save.set_value("screen", "curvature", main.curvature)
-	save.set_value("screen", "passthrough", main.passthrough_mode)
+	save.set_value("screen", "passthrough_enabled", main.passthrough_enabled)
+	save.set_value("screen", "background_mode", main.background_mode)
 	save.set_value("screen", "smooth_mode", main.smooth_mode)
 	save.set_value("screen", "sharpen_mode", main.sharpen_mode)
 	save.set_value("screen", "cursor_mode", main.cursor_mode)
@@ -19,8 +20,10 @@ func save_state():
 	save.set_value("controller", "active", main.controller_mapper.active)
 	save.set_value("controller", "ctrl_type", main.controller_mapper.ctrl_type)
 	save.set_value("controller", "btn_toggle", main.controller_mapper.btn_toggle)
+	save.set_value("controller", "primary_hand", main.controller_mapper.primary_hand)
 	save.set_value("controller", "hand_tracking_enabled", main.tracking_mode)
 	save.set_value("stream", "auto_reconnect", main.auto_reconnect_enabled)
+	save.set_value("stream", "quick_start", main.quick_start_enabled)
 	save.set_value("stream", "idle_timeout_min", main.idle_timeout_min)
 	save.set_value("local_capture", "restore_token", main.pipewire_restore_token)
 	save.save("user://app_state.cfg")
@@ -90,16 +93,22 @@ func sync_ui_to_settings():
 		main.ui_controller.update_option_btn(main._ui_bezel_btn, "On" if main.bezel_enabled else "Off")
 		main.ui_controller.update_option_btn(main._ui_hand_tracking_btn, main.tracking_labels[clampi(main.tracking_mode, 0, main.tracking_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[clampi(main.curvature, 0, main.curvature_labels.size() - 1)])
-		main.ui_controller.update_option_btn(main._ui_pt_btn, main.passthrough_labels[clampi(main.passthrough_mode, 0, main.passthrough_labels.size() - 1)])
+		main.ui_controller.update_option_btn(main._ui_pt_btn, "On" if main.passthrough_enabled else "Off")
+		main.ui_controller.update_option_btn(main._ui_bg_btn, main.background_labels[clampi(main.background_mode, 0, main.background_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_render_btn, main.smooth_labels[clampi(main.smooth_mode, 0, main.smooth_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_sharpen_btn, main.sharpen_labels[clampi(main.sharpen_mode, 0, main.sharpen_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_cursor_btn, main.cursor_labels[clampi(main.cursor_mode, 0, main.cursor_labels.size() - 1)])
 		main.ui_controller.update_option_btn(main._ui_steady_btn, main.pointer_steady_labels[clampi(main.pointer_steady, 0, main.pointer_steady_labels.size() - 1)])
 		main.ui_controller.update_codec_btn()
 		main.ui_controller.update_option_btn(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
+		if main._ui_quick_start_btn:
+			main.ui_controller.update_option_btn(main._ui_quick_start_btn, "On" if main.quick_start_enabled else "Off")
 		var idle_idx = main.settings_controller.idle_values.find(main.idle_timeout_min)
 		if idle_idx < 0: idle_idx = 0
 		main.ui_controller.update_option_btn(main._ui_idle_btn, main.settings_controller.idle_labels[idle_idx])
+		if main.controller_mapper:
+			main.ui_controller.update_btn_toggle_btn()
+			main.ui_controller.update_primary_btn()
 	if main.screen_manager:
 		main.screen_manager.update_bezel_size()
 	if main.settings_controller:
@@ -117,7 +126,12 @@ func load_state():
 
 	main.bezel_enabled = save.get_value("screen", "bezel", true)
 	main.curvature = save.get_value("screen", "curvature", 2)
-	main.passthrough_mode = save.get_value("screen", "passthrough", 0)
+	main.passthrough_enabled = save.get_value("screen", "passthrough_enabled", false)
+	main.background_mode = save.get_value("screen", "background_mode", 0)
+	if save.has_section_key("screen", "passthrough"):
+		var old = clampi(save.get_value("screen", "passthrough", 0), 0, 5)
+		main.passthrough_enabled = (old == 0)
+		main.background_mode = maxi(old - 1, 0)
 	main.smooth_mode = save.get_value("screen", "smooth_mode", save.get_value("screen", "render_mode", 0))
 	main.sharpen_mode = save.get_value("screen", "sharpen_mode", 0)
 	main.cursor_mode = save.get_value("screen", "cursor_mode", 1)
@@ -149,10 +163,13 @@ func load_state():
 			main.ui_controller.update_ctrl_mode_btn()
 			main.ui_controller.update_ctrl_type_btn()
 		main.controller_mapper.btn_toggle = clampi(save.get_value("controller", "btn_toggle", 1), 0, 2)
+		main.controller_mapper.primary_hand = clampi(save.get_value("controller", "primary_hand", 0), 0, 2)
 		if main.ui_controller:
 			main.ui_controller.update_btn_toggle_btn()
+			main.ui_controller.update_primary_btn()
 	main.screen_manager.apply_curvature()
 	main.auto_reconnect_enabled = save.get_value("stream", "auto_reconnect", true)
+	main.quick_start_enabled = save.get_value("stream", "quick_start", false)
 	main.idle_timeout_min = save.get_value("stream", "idle_timeout_min", 0)
 	main.pipewire_restore_token = save.get_value("local_capture", "restore_token", "")
 	if main.stream_backend and main.stream_backend._v2:

@@ -55,6 +55,7 @@ var _pair_pin: String = ""
 var _connecting_ip: String = ""
 var _connect_timeout_pending: bool = false
 var _auto_connect: bool = false
+var quick_start_enabled: bool = false
 var _restarting_stream: bool = false
 var is_streaming: bool = false
 var sbs_mode: int = 0
@@ -98,8 +99,9 @@ var stats_timer: float = 0.0
 var stats_fps: float = 0.0
 var stats_frame_times: Array = []
 var stats_network_events: int = 0
-var passthrough_mode: int = 0
-var passthrough_labels: Array = ["On", "Off", "Starfield", "Ash", "Snow", "Data"]
+var passthrough_enabled: bool = false
+var background_mode: int = 0
+var background_labels: Array = ["Black", "Starfield", "Ash", "Snow", "Data"]
 var bg_names: Array = ["Starfield", "Ash", "Snow", "Data"]
 var bg_offsets: Array = [Vector3.ZERO, Vector3.ZERO, Vector3(0, 10, 0), Vector3(0, -3, 0)]
 var ui_visible: bool = false
@@ -197,6 +199,7 @@ var _ui_mesh_size := Vector2(1.20, 0.58)
 var _ui_host_label: Label
 var _ui_status_label: Label
 var _ui_pt_btn: Button
+var _ui_bg_btn: Button
 var _ui_curve_btn: Button
 var _ui_bezel_btn: Button
 var _ui_hand_tracking_btn: Button
@@ -207,6 +210,8 @@ var _ui_fps_btn: Button
 var _ui_bitrate_btn: Button
 var _ui_ctrl_type_btn: Button
 var _ui_btn_toggle_btn: Button
+var _ui_primary_btn: Button
+var _ui_quick_start_btn: Button
 var _ui_render_btn: Button
 var _ui_sharpen_btn: Button
 var _ui_ctrl_mode_btn: Button
@@ -520,7 +525,7 @@ func _on_stream_started():
 		_ui_has_saved_offset = false
 		if comp_ui:
 			comp_ui.visible = false
-	if passthrough_mode < 2:
+	if not passthrough_enabled:
 		_hide_all_backgrounds()
 	var all_btn_flags = 0x1000|0x2000|0x4000|0x8000|0x0001|0x0002|0x0004|0x0008|0x0100|0x0200|0x0010|0x0020|0x0040|0x0080|0x0400
 	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
@@ -603,13 +608,14 @@ func _full_disconnect_cleanup(status_msg: String):
 	if comp_ui:
 		comp_ui.visible = false
 	welcome_screen.reset_connect_button()
-	if passthrough_mode >= 2:
-		var bg_idx = passthrough_mode - 2
-		if bg_idx >= 0 and bg_idx < bg_names.size():
-			var bg = get_node_or_null(bg_names[bg_idx])
-			if bg:
-				bg.visible = true
-				bg.emitting = true
+	if not passthrough_enabled:
+		if background_mode > 0:
+			var bg_idx = background_mode - 1
+			if bg_idx >= 0 and bg_idx < bg_names.size():
+				var bg = get_node_or_null(bg_names[bg_idx])
+				if bg:
+					bg.visible = true
+					bg.emitting = true
 	welcome_screen.update_welcome_info()
 	stream_manager.resize_stream_viewport(1920, 1080)
 
@@ -667,7 +673,7 @@ func _ready():
 	_init_post_xr()
 	_init_textures_and_ui()
 
-	if _auto_connect:
+	if _auto_connect or quick_start_enabled:
 		_try_auto_connect()
 
 	Input.joy_connection_changed.connect(func(device, connected):
@@ -707,12 +713,17 @@ func _init_android_setup():
 	if right_hand and left_hand:
 		var right_ray = right_hand.get_node_or_null("HandRayCast")
 		if right_ray:
+			var right_laser_node = right_ray.get_node_or_null("Laser")
+			if right_laser_node:
+				var laser_shader = load("res://src/shaders/laser_fade.gdshader")
+				if laser_shader:
+					var mat = ShaderMaterial.new()
+					mat.shader = laser_shader
+					mat.set_shader_parameter("albedo", Color(1, 1, 1, 0.5))
+					right_laser_node.material_override = mat
 			left_hand_raycast = right_ray.duplicate()
 			left_hand_raycast.name = "LeftHandRayCast"
 			left_hand.add_child(left_hand_raycast)
-
-	if has_node("%Laser"):
-		get_node("%Laser").material_override.render_priority = 100
 
 	right_hand_visual = _create_hand_visualizer(false)
 	left_hand_visual = _create_hand_visualizer(true)
@@ -817,13 +828,10 @@ func _init_xr(interface):
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 0)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
-		passthrough_labels = ["On", "Off", "Starfield", "Ash", "Snow", "Data"]
 	else:
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 1)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
-		passthrough_mode = 1
-		passthrough_labels = ["Off", "Starfield", "Ash", "Snow", "Data"]
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
@@ -835,7 +843,6 @@ func _init_xr(interface):
 	is_xr_active = true
 	sbs_mode = 0
 	ai_3d_mode = 0
-	passthrough_mode = 0
 
 	settings_controller.apply_display_refresh_rate()
 
@@ -851,11 +858,9 @@ func _init_post_xr():
 	if comp.available:
 		_switch_to_comp_layer()
 
-	if passthrough_mode > 0:
-		var saved_pt = passthrough_mode
-		passthrough_mode = 0
-		for i in range(saved_pt):
-			settings_controller.toggle_passthrough()
+	if passthrough_enabled:
+		settings_controller.apply_passthrough(true)
+	settings_controller.apply_background(background_mode)
 
 	ui_visible = false
 	_set_ui_visible(false)
@@ -963,6 +968,54 @@ func _process(delta):
 			_startup_cover.queue_free()
 			_startup_cover = null
 			_log("[COVER] Startup cover removed")
+
+	_process_controller_fade(delta)
+
+func _process_controller_fade(delta: float):
+	if _is_using_hands or not is_xr_active:
+		return
+	var right_moved = _process_hand_fade(right_hand, "right", delta)
+	var left_moved = _process_hand_fade(left_hand, "left", delta)
+	if not right_moved and not left_moved:
+		xr_interaction._controller_inactive_time += delta
+	else:
+		xr_interaction._controller_inactive_time = 0.0
+
+func _process_hand_fade(hand: XRController3D, side: String, delta: float) -> bool:
+	if not hand:
+		return false
+	var pos = hand.global_position
+	var last_pos = xr_interaction._last_known_right_pos if side == "right" else xr_interaction._last_known_left_pos
+	var moved = last_pos.distance_squared_to(pos) > 0.0005
+	if side == "right":
+		xr_interaction._last_known_right_pos = pos
+	else:
+		xr_interaction._last_known_left_pos = pos
+	var is_active = (xr_interaction._active_hand == side) or xr_interaction._controller_inactive_time < 5.0
+	var target_alpha = 1.0 if is_active else 0.2
+	var current_alpha = _get_hand_material_alpha(hand)
+	var new_alpha = move_toward(current_alpha, target_alpha, delta * 0.5)
+	_set_hand_material_alpha(hand, new_alpha)
+	return moved
+
+func _get_hand_material_alpha(hand: XRController3D) -> float:
+	for child in hand.get_children():
+		if child is MeshInstance3D and child.material_override:
+			return child.material_override.albedo_color.a
+	return 1.0
+
+func _set_hand_material_alpha(hand: XRController3D, alpha: float):
+	for child in hand.get_children():
+		if child is MeshInstance3D:
+			if child.material_override:
+				child.material_override.albedo_color.a = alpha
+			else:
+				var mat = child.get_active_material(0)
+				if mat and mat is StandardMaterial3D:
+					var dup = mat.duplicate()
+					dup.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					dup.albedo_color.a = alpha
+					child.material_override = dup
 
 func _process_hand_tracking(_delta):
 	var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
@@ -1275,6 +1328,7 @@ func _apply_controller_textures(node: Node, is_left: bool):
 		_apply_controller_textures(child, is_left)
 
 var contact_dot: MeshInstance3D
+var left_contact_dot: MeshInstance3D
 var pointer_cursor: MeshInstance3D
 
 func _create_contact_dot():
@@ -1293,6 +1347,21 @@ func _create_contact_dot():
 	contact_dot.material_override = dot_mat
 	contact_dot.visible = false
 	add_child(contact_dot)
+	left_contact_dot = MeshInstance3D.new()
+	left_contact_dot.name = "LeftContactDot"
+	var ldot_mesh = SphereMesh.new()
+	ldot_mesh.radius = 0.01
+	ldot_mesh.height = 0.02
+	left_contact_dot.mesh = ldot_mesh
+	var ldot_mat = StandardMaterial3D.new()
+	ldot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ldot_mat.albedo_color = Color(1, 1, 1, 0.1)
+	ldot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ldot_mat.render_priority = 127
+	ldot_mat.no_depth_test = true
+	left_contact_dot.material_override = ldot_mat
+	left_contact_dot.visible = false
+	add_child(left_contact_dot)
 
 	pointer_cursor = MeshInstance3D.new()
 	pointer_cursor.name = "PointerCursor"

@@ -11,6 +11,13 @@ var _click_pending_release: bool = false
 var _corner_resize_started: bool = false
 var _corner_start_width: float = 0.0
 var _corner_start_hit_x: float = 0.0
+var _auto_primary: String = ""
+var _auto_reset_timer: float = 0.0
+var _right_on_screen: bool = false
+var _left_on_screen: bool = false
+var _controller_inactive_time: float = 0.0
+var _last_known_right_pos: Vector3 = Vector3.ZERO
+var _last_known_left_pos: Vector3 = Vector3.ZERO
 
 func _init(owner: Node3D):
 	main = owner
@@ -19,6 +26,11 @@ func get_active_raycast() -> RayCast3D:
 	if not main.is_xr_active:
 		return main.mouse_raycast
 	if _active_hand == "left" and main.left_hand_raycast:
+		return main.left_hand_raycast
+	return main.hand_raycast
+
+func _get_hand_raycast(hand: String) -> RayCast3D:
+	if hand == "left" and main.left_hand_raycast:
 		return main.left_hand_raycast
 	return main.hand_raycast
 
@@ -54,28 +66,55 @@ func _get_hand_grasp_strength(tracker_name: String) -> float:
 func _update_active_hand():
 	if not main.is_xr_active:
 		return
-	if not main.get_is_hand_tracking():
-		_active_hand = "right"
-		return
-	var right_has_data = false
-	var left_has_data = false
-	var right_tracker = XRServer.get_tracker("/user/hand_tracker/right")
-	var left_tracker = XRServer.get_tracker("/user/hand_tracker/left")
-	if right_tracker and right_tracker is XRHandTracker and right_tracker.get_has_tracking_data():
-		right_has_data = true
-	if left_tracker and left_tracker is XRHandTracker and left_tracker.get_has_tracking_data():
-		left_has_data = true
-	if right_has_data and left_has_data:
-		var right_pinch = _get_hand_pinch_strength("/user/hand_tracker/right")
-		var left_pinch = _get_hand_pinch_strength("/user/hand_tracker/left")
-		if left_pinch > 0.5 and right_pinch <= 0.5:
+	if main._is_using_hands:
+		var right_has_data = false
+		var left_has_data = false
+		var right_tracker = XRServer.get_tracker("/user/hand_tracker/right")
+		var left_tracker = XRServer.get_tracker("/user/hand_tracker/left")
+		if right_tracker and right_tracker is XRHandTracker and right_tracker.get_has_tracking_data():
+			right_has_data = true
+		if left_tracker and left_tracker is XRHandTracker and left_tracker.get_has_tracking_data():
+			left_has_data = true
+		if right_has_data and left_has_data:
+			var right_pinch = _get_hand_pinch_strength("/user/hand_tracker/right")
+			var left_pinch = _get_hand_pinch_strength("/user/hand_tracker/left")
+			if left_pinch > 0.5 and right_pinch <= 0.5:
+				_active_hand = "left"
+			elif right_pinch > 0.5 and left_pinch <= 0.5:
+				_active_hand = "right"
+		elif left_has_data and not right_has_data:
 			_active_hand = "left"
-		elif right_pinch > 0.5 and left_pinch <= 0.5:
+		elif right_has_data:
 			_active_hand = "right"
-	elif left_has_data and not right_has_data:
-		_active_hand = "left"
-	elif right_has_data:
-		_active_hand = "right"
+		return
+	var primary = main.controller_mapper.primary_hand if main.controller_mapper else 0
+	match primary:
+		ControllerMapper.PrimaryHand.RIGHT:
+			_active_hand = "right"
+		ControllerMapper.PrimaryHand.LEFT:
+			_active_hand = "left"
+		_:
+			_active_hand = _get_auto_primary()
+
+func _get_auto_primary() -> String:
+	if _auto_primary != "":
+		return _auto_primary
+	if _right_on_screen and not _left_on_screen:
+		_auto_primary = "right"
+		_auto_reset_timer = 1.0
+	elif _left_on_screen and not _right_on_screen:
+		_auto_primary = "left"
+		_auto_reset_timer = 1.0
+	return _active_hand if _active_hand != "" else "right"
+
+func _process_auto_primary(delta: float):
+	if not _right_on_screen and not _left_on_screen:
+		_auto_reset_timer -= delta
+		if _auto_reset_timer <= 0.0:
+			_auto_primary = ""
+			_auto_reset_timer = 0.0
+	else:
+		_auto_reset_timer = 1.0
 
 func _is_now_clicking() -> bool:
 	if not main.is_xr_active:
@@ -84,8 +123,9 @@ func _is_now_clicking() -> bool:
 		var tracker_name = "/user/hand_tracker/left" if _active_hand == "left" else "/user/hand_tracker/right"
 		return _get_hand_pinch_strength(tracker_name) > 0.85
 	else:
-		if main.right_hand:
-			return main.right_hand.get_float("trigger") > 0.5
+		var hand = main.left_hand if _active_hand == "left" else main.right_hand
+		if hand:
+			return hand.get_float("trigger") > 0.5
 		return false
 
 func _is_now_gripping() -> bool:
@@ -94,9 +134,7 @@ func _is_now_gripping() -> bool:
 	if main._is_using_hands:
 		var tracker_name = "/user/hand_tracker/left" if _active_hand == "left" else "/user/hand_tracker/right"
 		return _get_hand_grasp_strength(tracker_name) > 0.85
-	var hand = main.left_hand
-	if _active_hand == "right":
-		hand = main.right_hand
+	var hand = main.left_hand if _active_hand == "left" else main.right_hand
 	if not hand:
 		return false
 	if hand.is_button_pressed("grip_click"):
@@ -181,23 +219,19 @@ func handle_pointer_interaction():
 	if main.left_hand_raycast:
 		left_laser = main.left_hand_raycast.get_node_or_null("Laser")
 	if main.is_xr_active:
+		var right_hit = main.hand_raycast and main.hand_raycast.is_colliding()
+		var left_hit = main.left_hand_raycast and main.left_hand_raycast.is_colliding()
 		if main._is_using_hands:
 			var has_data = main.get_hand_tracking_has_data()
-			if _active_hand == "left":
-				if right_laser:
-					right_laser.visible = false
-				if left_laser:
-					left_laser.visible = has_data
-			else:
-				if right_laser:
-					right_laser.visible = has_data
-				if left_laser:
-					left_laser.visible = false
+			if right_laser:
+				right_laser.visible = has_data and _active_hand == "right" and right_hit
+			if left_laser:
+				left_laser.visible = has_data and _active_hand == "left" and left_hit
 		else:
 			if right_laser:
-				right_laser.visible = true
+				right_laser.visible = _active_hand == "right" and right_hit
 			if left_laser:
-				left_laser.visible = false
+				left_laser.visible = _active_hand == "left" and left_hit
 	else:
 		if right_laser:
 			right_laser.visible = false
@@ -463,6 +497,73 @@ func handle_pointer_interaction():
 			main.stream_backend.send_mouse_button_event(8, 1)
 		main.was_clicking = false
 		_click_pending_release = false
+
+	_update_on_screen_tracking()
+	_process_other_hand_ui()
+	_process_auto_primary(main.get_process_delta_time())
+
+func _update_on_screen_tracking():
+	_right_on_screen = _is_hand_on_screen("right")
+	_left_on_screen = _is_hand_on_screen("left")
+
+func _is_hand_on_screen(hand: String) -> bool:
+	var rc = main.hand_raycast if hand == "right" else main.left_hand_raycast
+	if not rc or not rc.is_colliding():
+		return false
+	var col = rc.get_collider()
+	if not col:
+		return false
+	var p = col.get_parent()
+	return p == main.screen_mesh or p == main.ui_panel_3d or (main.virtual_keyboard and main.virtual_keyboard.visible and p == main.virtual_keyboard.mesh_instance)
+
+func _process_other_hand_ui():
+	if not main.is_xr_active or main._is_using_hands:
+		if main.left_contact_dot:
+			main.left_contact_dot.visible = false
+		return
+	var other = "left" if _active_hand == "right" else "right"
+	var rc = _get_hand_raycast(other)
+	if not rc or not rc.is_colliding():
+		if main.left_contact_dot:
+			main.left_contact_dot.visible = false
+		return
+	var col = rc.get_collider()
+	if not col:
+		if main.left_contact_dot:
+			main.left_contact_dot.visible = false
+		return
+	var parent = col.get_parent()
+	if parent != main.ui_panel_3d and not (main.virtual_keyboard and main.virtual_keyboard.visible and parent == main.virtual_keyboard.mesh_instance):
+		if main.left_contact_dot:
+			main.left_contact_dot.visible = false
+		return
+	var panel = parent
+	var wv = main.ui_viewport if panel == main.ui_panel_3d else (main.virtual_keyboard.viewport if main.virtual_keyboard else null)
+	if not wv:
+		return
+	var hit_pos = rc.get_collision_point()
+	if main.left_contact_dot:
+		main.left_contact_dot.global_position = hit_pos
+		main.left_contact_dot.visible = true
+	var local_pos = panel.to_local(hit_pos)
+	var half_w = main._ui_mesh_size.x / 2.0 if panel == main.ui_panel_3d else (main.virtual_keyboard.mesh_scale.x / 2.0 if main.virtual_keyboard else 1.0)
+	var half_h = main._ui_mesh_size.y / 2.0 if panel == main.ui_panel_3d else (main.virtual_keyboard.mesh_scale.y / 2.0 if main.virtual_keyboard else 1.0)
+	var nx = clampf((local_pos.x / half_w + 1.0) / 2.0, 0.0, 1.0)
+	var ny = clampf(1.0 - (local_pos.y / half_h + 1.0) / 2.0, 0.0, 1.0)
+	var vp_size = main._ui_viewport_size if panel == main.ui_panel_3d else (main.virtual_keyboard.viewport_size if main.virtual_keyboard else Vector2i(800, 400))
+	var pixel_pos = Vector2(nx * vp_size.x, ny * vp_size.y)
+	var ev = InputEventMouseMotion.new()
+	ev.position = pixel_pos
+	ev.global_position = pixel_pos
+	wv.push_input(ev)
+	var hand = main.left_hand if other == "left" else main.right_hand
+	if hand and hand.get_float("trigger") > 0.5:
+		var click_ev = InputEventMouseButton.new()
+		click_ev.position = pixel_pos
+		click_ev.global_position = pixel_pos
+		click_ev.button_index = MOUSE_BUTTON_LEFT
+		click_ev.pressed = true
+		wv.push_input(click_ev)
 
 func handle_grab():
 	if not main.grabbed_node:
