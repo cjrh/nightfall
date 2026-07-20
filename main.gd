@@ -939,6 +939,7 @@ func _process(delta):
 
 	if not mouse_captured_by_stream:
 		xr_interaction.handle_pointer_interaction()
+	xr_interaction._process_other_hand_ui()
 	xr_interaction.handle_scroll()
 	_update_cursor_layer()
 
@@ -978,48 +979,62 @@ func _process(delta):
 func _process_controller_fade(delta: float):
 	if _is_using_hands or not is_xr_active:
 		return
-	var right_moved = _process_hand_fade(right_hand, "right", delta)
-	var left_moved = _process_hand_fade(left_hand, "left", delta)
-	if not right_moved and not left_moved:
-		xr_interaction._controller_inactive_time += delta
+	if not _process_hand_fade(right_hand, "right", delta):
+		xr_interaction._right_inactive_time += delta
 	else:
-		xr_interaction._controller_inactive_time = 0.0
+		xr_interaction._right_inactive_time = 0.0
+	if not _process_hand_fade(left_hand, "left", delta):
+		xr_interaction._left_inactive_time += delta
+	else:
+		xr_interaction._left_inactive_time = 0.0
 
 func _process_hand_fade(hand: XRController3D, side: String, delta: float) -> bool:
 	if not hand:
 		return false
 	var pos = hand.global_position
 	var last_pos = xr_interaction._last_known_right_pos if side == "right" else xr_interaction._last_known_left_pos
-	var moved = last_pos.distance_squared_to(pos) > 0.0005
+	var moved = last_pos.distance_squared_to(pos) > 0.00001
 	if side == "right":
 		xr_interaction._last_known_right_pos = pos
 	else:
 		xr_interaction._last_known_left_pos = pos
-	var is_active = (xr_interaction._active_hand == side) or xr_interaction._controller_inactive_time < 5.0
-	var target_alpha = 1.0 if is_active else 0.2
+	var inactive_time = xr_interaction._right_inactive_time if side == "right" else xr_interaction._left_inactive_time
+	var is_active = inactive_time < 2.0
+	var target_alpha = 1.0 if is_active else 0.02
 	var current_alpha = _get_hand_material_alpha(hand)
-	var new_alpha = move_toward(current_alpha, target_alpha, delta * 0.5)
+	var new_alpha = move_toward(current_alpha, target_alpha, delta * 2.0)
 	_set_hand_material_alpha(hand, new_alpha)
 	return moved
 
 func _get_hand_material_alpha(hand: XRController3D) -> float:
-	for child in hand.get_children():
-		if child is MeshInstance3D and child.material_override:
-			return child.material_override.albedo_color.a
-	return 1.0
+	var a = _find_alpha_recursive(hand)
+	return a if a >= 0.0 else 1.0
+
+func _find_alpha_recursive(node: Node) -> float:
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			var mat = child.get_active_material(0)
+			if mat and mat is BaseMaterial3D:
+				return mat.albedo_color.a
+		var res = _find_alpha_recursive(child)
+		if res >= 0.0:
+			return res
+	return -1.0
 
 func _set_hand_material_alpha(hand: XRController3D, alpha: float):
-	for child in hand.get_children():
+	_set_alpha_recursive(hand, alpha)
+
+func _set_alpha_recursive(node: Node, alpha: float):
+	for child in node.get_children():
 		if child is MeshInstance3D:
-			if child.material_override:
-				child.material_override.albedo_color.a = alpha
-			else:
-				var mat = child.get_active_material(0)
-				if mat and mat is StandardMaterial3D:
+			var mat = child.get_active_material(0)
+			if mat and mat is BaseMaterial3D:
+				if mat.albedo_color.a != alpha or mat.transparency != BaseMaterial3D.TRANSPARENCY_ALPHA:
 					var dup = mat.duplicate()
 					dup.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 					dup.albedo_color.a = alpha
 					child.material_override = dup
+		_set_alpha_recursive(child, alpha)
 
 func _process_hand_tracking(_delta):
 	var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
@@ -1338,35 +1353,11 @@ var left_contact_dot: MeshInstance3D
 var pointer_cursor: MeshInstance3D
 
 func _create_contact_dot():
-	contact_dot = MeshInstance3D.new()
+	contact_dot = _make_contact_dot()
 	contact_dot.name = "ContactDot"
-	var dot_mesh = SphereMesh.new()
-	dot_mesh.radius = 0.01
-	dot_mesh.height = 0.02
-	contact_dot.mesh = dot_mesh
-	var dot_mat = StandardMaterial3D.new()
-	dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dot_mat.albedo_color = Color(1, 1, 1, 0.1)
-	dot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dot_mat.render_priority = 127
-	dot_mat.no_depth_test = true
-	contact_dot.material_override = dot_mat
-	contact_dot.visible = false
 	add_child(contact_dot)
-	left_contact_dot = MeshInstance3D.new()
+	left_contact_dot = _make_contact_dot()
 	left_contact_dot.name = "LeftContactDot"
-	var ldot_mesh = SphereMesh.new()
-	ldot_mesh.radius = 0.01
-	ldot_mesh.height = 0.02
-	left_contact_dot.mesh = ldot_mesh
-	var ldot_mat = StandardMaterial3D.new()
-	ldot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ldot_mat.albedo_color = Color(1, 1, 1, 0.1)
-	ldot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	ldot_mat.render_priority = 127
-	ldot_mat.no_depth_test = true
-	left_contact_dot.material_override = ldot_mat
-	left_contact_dot.visible = false
 	add_child(left_contact_dot)
 
 	pointer_cursor = MeshInstance3D.new()
@@ -1386,6 +1377,22 @@ func _create_contact_dot():
 	pointer_cursor.visible = false
 	pointer_cursor.extra_cull_margin = 10.0
 	add_child(pointer_cursor)
+
+func _make_contact_dot() -> MeshInstance3D:
+	var dot = MeshInstance3D.new()
+	var m = SphereMesh.new()
+	m.radius = 0.015
+	m.height = 0.03
+	dot.mesh = m
+	var mat = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1, 1, 1, 0.2)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = 200
+	mat.no_depth_test = true
+	dot.material_override = mat
+	dot.visible = false
+	return dot
 
 func _hide_all_backgrounds():
 	if bg_manager:

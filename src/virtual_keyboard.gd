@@ -11,6 +11,7 @@ var _key_area_width := 1600
 var _kb_root: Control
 var _key_data: Array = []
 var _held_keys: Dictionary = {}
+var _held_keys_secondary: Dictionary = {}
 var _shift_on: bool = false
 var _ctrl_on: bool = false
 var _alt_on: bool = false
@@ -245,6 +246,22 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 		for kc in _held_keys.keys():
 			_on_key_release(kc)
 		_held_keys.clear()
+
+func handle_secondary_key(pixel_pos: Vector2, pressed: bool):
+	if not visible:
+		return
+	if pixel_pos.x >= _kb_width:
+		return
+	var key_code = _key_from_pos(pixel_pos)
+	if key_code < 0:
+		return
+	if pressed:
+		_on_key_press(key_code)
+		_held_keys_secondary[key_code] = true
+	else:
+		for kc in _held_keys_secondary.keys():
+			_on_key_release(kc)
+		_held_keys_secondary.clear()
 
 func _set_tp_active_visual(active: bool):
 	var base_color = Color(0.25, 0.25, 0.35, 0.4)
