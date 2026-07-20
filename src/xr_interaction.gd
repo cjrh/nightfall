@@ -15,6 +15,8 @@ var _auto_primary: String = ""
 var _auto_reset_timer: float = 0.0
 var _right_on_screen: bool = false
 var _left_on_screen: bool = false
+var _other_hand_clicking: bool = false
+var _other_hand_click_viewport = null
 var _controller_inactive_time: float = 0.0
 var _last_known_right_pos: Vector3 = Vector3.ZERO
 var _last_known_left_pos: Vector3 = Vector3.ZERO
@@ -101,10 +103,10 @@ func _get_auto_primary() -> String:
 		return _auto_primary
 	if _right_on_screen and not _left_on_screen:
 		_auto_primary = "right"
-		_auto_reset_timer = 1.0
+		_auto_reset_timer = 0.2
 	elif _left_on_screen and not _right_on_screen:
 		_auto_primary = "left"
-		_auto_reset_timer = 1.0
+		_auto_reset_timer = 0.2
 	return _active_hand if _active_hand != "" else "right"
 
 func _process_auto_primary(delta: float):
@@ -114,7 +116,7 @@ func _process_auto_primary(delta: float):
 			_auto_primary = ""
 			_auto_reset_timer = 0.0
 	else:
-		_auto_reset_timer = 1.0
+		_auto_reset_timer = 0.2
 
 func _is_now_clicking() -> bool:
 	if not main.is_xr_active:
@@ -147,6 +149,9 @@ func _is_now_gripping() -> bool:
 
 func handle_pointer_interaction():
 	_update_active_hand()
+	_update_on_screen_tracking()
+	_process_other_hand_ui()
+	_process_auto_primary(main.get_process_delta_time())
 	var active_raycast = get_active_raycast()
 	pointer_on_ui = false
 
@@ -498,10 +503,6 @@ func handle_pointer_interaction():
 		main.was_clicking = false
 		_click_pending_release = false
 
-	_update_on_screen_tracking()
-	_process_other_hand_ui()
-	_process_auto_primary(main.get_process_delta_time())
-
 func _update_on_screen_tracking():
 	_right_on_screen = _is_hand_on_screen("right")
 	_left_on_screen = _is_hand_on_screen("left")
@@ -518,24 +519,20 @@ func _is_hand_on_screen(hand: String) -> bool:
 
 func _process_other_hand_ui():
 	if not main.is_xr_active or main._is_using_hands:
-		if main.left_contact_dot:
-			main.left_contact_dot.visible = false
+		_hide_other_hand_ui()
 		return
 	var other = "left" if _active_hand == "right" else "right"
 	var rc = _get_hand_raycast(other)
 	if not rc or not rc.is_colliding():
-		if main.left_contact_dot:
-			main.left_contact_dot.visible = false
+		_hide_other_hand_ui()
 		return
 	var col = rc.get_collider()
 	if not col:
-		if main.left_contact_dot:
-			main.left_contact_dot.visible = false
+		_hide_other_hand_ui()
 		return
 	var parent = col.get_parent()
 	if parent != main.ui_panel_3d and not (main.virtual_keyboard and main.virtual_keyboard.visible and parent == main.virtual_keyboard.mesh_instance):
-		if main.left_contact_dot:
-			main.left_contact_dot.visible = false
+		_hide_other_hand_ui()
 		return
 	var panel = parent
 	var wv = main.ui_viewport if panel == main.ui_panel_3d else (main.virtual_keyboard.viewport if main.virtual_keyboard else null)
@@ -552,18 +549,41 @@ func _process_other_hand_ui():
 	var ny = clampf(1.0 - (local_pos.y / half_h + 1.0) / 2.0, 0.0, 1.0)
 	var vp_size = main._ui_viewport_size if panel == main.ui_panel_3d else (main.virtual_keyboard.viewport_size if main.virtual_keyboard else Vector2i(800, 400))
 	var pixel_pos = Vector2(nx * vp_size.x, ny * vp_size.y)
-	var ev = InputEventMouseMotion.new()
-	ev.position = pixel_pos
-	ev.global_position = pixel_pos
-	wv.push_input(ev)
+	var touch = InputEventScreenDrag.new()
+	touch.index = 1
+	touch.position = pixel_pos
+	wv.push_input(touch)
 	var hand = main.left_hand if other == "left" else main.right_hand
-	if hand and hand.get_float("trigger") > 0.5:
-		var click_ev = InputEventMouseButton.new()
-		click_ev.position = pixel_pos
-		click_ev.global_position = pixel_pos
-		click_ev.button_index = MOUSE_BUTTON_LEFT
-		click_ev.pressed = true
-		wv.push_input(click_ev)
+	var clicking = hand and hand.get_float("trigger") > 0.5
+	if clicking and not _other_hand_clicking:
+		_other_hand_clicking = true
+		_other_hand_click_viewport = wv
+		var te = InputEventScreenTouch.new()
+		te.index = 1
+		te.position = pixel_pos
+		te.pressed = true
+		wv.push_input(te)
+	elif not clicking and _other_hand_clicking:
+		_other_hand_clicking = false
+		var te = InputEventScreenTouch.new()
+		te.index = 1
+		te.position = pixel_pos
+		te.pressed = false
+		if _other_hand_click_viewport:
+			_other_hand_click_viewport.push_input(te)
+		_other_hand_click_viewport = null
+
+func _hide_other_hand_ui():
+	if _other_hand_clicking:
+		_other_hand_clicking = false
+		var te = InputEventScreenTouch.new()
+		te.index = 1
+		te.pressed = false
+		if _other_hand_click_viewport:
+			_other_hand_click_viewport.push_input(te)
+		_other_hand_click_viewport = null
+	if main.left_contact_dot:
+		main.left_contact_dot.visible = false
 
 func handle_grab():
 	if not main.grabbed_node:

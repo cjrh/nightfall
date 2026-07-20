@@ -715,11 +715,15 @@ func _init_android_setup():
 		if right_ray:
 			var right_laser_node = right_ray.get_node_or_null("Laser")
 			if right_laser_node:
-				var laser_shader = load("res://src/shaders/laser_fade.gdshader")
-				if laser_shader:
-					var mat = ShaderMaterial.new()
-					mat.shader = laser_shader
-					mat.set_shader_parameter("albedo", Color(1, 1, 1, 0.5))
+				var tex = _make_laser_gradient()
+				if tex:
+					var mat = StandardMaterial3D.new()
+					mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					mat.albedo_color = Color(1, 1, 1, 0.5)
+					mat.albedo_texture = tex
+					mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					mat.render_priority = 127
+					mat.no_depth_test = true
 					right_laser_node.material_override = mat
 			left_hand_raycast = right_ray.duplicate()
 			left_hand_raycast.name = "LeftHandRayCast"
@@ -1320,10 +1324,12 @@ func _apply_controller_textures(node: Node, is_left: bool):
 				if mat is StandardMaterial3D:
 					mat = mat.duplicate()
 					mat.albedo_texture = base_tex
+					mat.render_priority = 127
 					child.set_surface_override_material(i, mat)
 				elif mat is BaseMaterial3D:
 					mat = mat.duplicate()
 					mat.albedo_texture = base_tex
+					mat.render_priority = 127
 					child.set_surface_override_material(i, mat)
 		_apply_controller_textures(child, is_left)
 
@@ -1509,3 +1515,10 @@ func _update_hand_tracker_transform(hand_node: XRController3D, tracker: XRHandTr
 			var t = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
 			t.basis = t.basis.rotated(t.basis.y, PI)
 			hand_node.transform = t
+
+func _make_laser_gradient() -> ImageTexture:
+	var img = Image.create(1, 256, false, Image.FORMAT_RGBA8)
+	for y in range(256):
+		var a = 1.0 - float(y) / 255.0
+		img.set_pixel(0, y, Color(1, 1, 1, a))
+	return ImageTexture.create_from_image(img)
