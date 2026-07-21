@@ -21,6 +21,13 @@ var _left_inactive_time: float = 0.0
 var _last_known_right_pos: Vector3 = Vector3.ZERO
 var _last_known_left_pos: Vector3 = Vector3.ZERO
 
+var _primary_ui_pixel: Vector2 = Vector2(-1, -1)
+var _secondary_ui_pixel: Vector2 = Vector2(-1, -1)
+var _ui_button_states: Array = []
+
+func populate_ui_buttons(buttons: Array):
+	_ui_button_states = buttons
+
 func _init(owner: Node3D):
 	main = owner
 
@@ -153,6 +160,10 @@ func handle_pointer_interaction():
 	_process_auto_primary(main.get_process_delta_time())
 	var active_raycast = get_active_raycast()
 	pointer_on_ui = false
+	if main.contact_dot_ui:
+		main.contact_dot_ui.visible = false
+
+	_primary_ui_pixel = Vector2(-1, -1)
 
 	var is_now_clicking = _is_now_clicking()
 	if is_now_clicking and not main.was_clicking and not _click_pending_release:
@@ -320,6 +331,15 @@ func handle_pointer_interaction():
 			var nx = clampf((local_pos.x / half_w + 1.0) / 2.0, 0.0, 1.0)
 			var ny = clampf(1.0 - (local_pos.y / half_h + 1.0) / 2.0, 0.0, 1.0)
 			var pixel_pos = Vector2(nx * main._ui_viewport_size.x, ny * main._ui_viewport_size.y)
+			_primary_ui_pixel = pixel_pos
+
+			if main.contact_dot_ui:
+				main.contact_dot_ui.position = pixel_pos - main.contact_dot_ui.size / 2.0
+				main.contact_dot_ui.visible = true
+			if main.contact_dot:
+				main.contact_dot.visible = false
+			if main.left_contact_dot_ui:
+				main.left_contact_dot_ui.visible = false
 
 			var is_grab_bar = _is_ui_grab_bar(pixel_pos)
 			if main.grabbed_node == main.ui_panel_3d:
@@ -553,18 +573,32 @@ func _process_other_hand_ui():
 	if not wv:
 		return
 	var hit_pos = rc.get_collision_point()
-	var col_normal = rc.get_collision_normal()
-	var dot_offset = col_normal * 0.025 if col_normal != Vector3() else (main.xr_camera.global_position - hit_pos).normalized() * 0.025
-	if main.left_contact_dot:
-		main.left_contact_dot.global_position = hit_pos + dot_offset
-		main.left_contact_dot.visible = true
 	var local_pos = panel.to_local(hit_pos)
-	var half_w = main._ui_mesh_size.x / 2.0 if panel == main.ui_panel_3d else (main.virtual_keyboard.mesh_scale.x / 2.0 if main.virtual_keyboard else 1.0)
-	var half_h = main._ui_mesh_size.y / 2.0 if panel == main.ui_panel_3d else (main.virtual_keyboard.mesh_scale.y / 2.0 if main.virtual_keyboard else 1.0)
+	var half_w = main._ui_mesh_size.x / 2.0 if panel == main.ui_panel_3d else (main.virtual_keyboard.mesh_size.x / 2.0 if main.virtual_keyboard else 1.0)
+	var half_h = main._ui_mesh_size.y / 2.0 if panel == main.ui_panel_3d else (main.virtual_keyboard.mesh_size.y / 2.0 if main.virtual_keyboard else 1.0)
 	var nx = clampf((local_pos.x / half_w + 1.0) / 2.0, 0.0, 1.0)
 	var ny = clampf(1.0 - (local_pos.y / half_h + 1.0) / 2.0, 0.0, 1.0)
 	var vp_size = main._ui_viewport_size if panel == main.ui_panel_3d else (main.virtual_keyboard.viewport_size if main.virtual_keyboard else Vector2i(800, 400))
 	var pixel_pos = Vector2(nx * vp_size.x, ny * vp_size.y)
+
+	if panel == main.ui_panel_3d:
+		_secondary_ui_pixel = pixel_pos
+		if main.left_contact_dot:
+			main.left_contact_dot.visible = false
+		if main.left_contact_dot_ui:
+			main.left_contact_dot_ui.position = pixel_pos - main.left_contact_dot_ui.size / 2.0
+			main.left_contact_dot_ui.visible = true
+	else:
+		_secondary_ui_pixel = Vector2(-1, -1)
+		var col_normal = rc.get_collision_normal()
+		var dot_offset = col_normal * 0.025 if col_normal != Vector3() else (main.xr_camera.global_position - hit_pos).normalized() * 0.025
+		if main.left_contact_dot:
+			main.left_contact_dot.global_position = hit_pos + dot_offset
+			main.left_contact_dot.visible = true
+		if main.left_contact_dot_ui:
+			main.left_contact_dot_ui.visible = false
+		if main.virtual_keyboard:
+			main.virtual_keyboard.handle_secondary_pointer(pixel_pos)
 	var motion = InputEventMouseMotion.new()
 	motion.position = pixel_pos
 	motion.global_position = pixel_pos
@@ -594,6 +628,7 @@ func _process_other_hand_ui():
 			main.virtual_keyboard.handle_secondary_key(pixel_pos, false)
 
 func _hide_other_hand_ui():
+	_secondary_ui_pixel = Vector2(-1, -1)
 	if _other_hand_clicking:
 		_other_hand_clicking = false
 		var btn = InputEventMouseButton.new()
@@ -604,8 +639,29 @@ func _hide_other_hand_ui():
 		if main.virtual_keyboard and main.virtual_keyboard.visible:
 			main.virtual_keyboard.handle_secondary_key(Vector2.ZERO, false)
 			main.virtual_keyboard.viewport.push_input(btn)
+	if main.virtual_keyboard:
+		main.virtual_keyboard.handle_secondary_pointer(Vector2(-1, -1))
 	if main.left_contact_dot:
 		main.left_contact_dot.visible = false
+	if main.left_contact_dot_ui:
+		main.left_contact_dot_ui.visible = false
+
+func _apply_ui_hover_states():
+	if not main.ui_visible:
+		return
+	for entry in _ui_button_states:
+		var btn: Button = entry["btn"]
+		if not btn.visible:
+			continue
+		var hovered = _point_in_ui_rect(_primary_ui_pixel, btn) or _point_in_ui_rect(_secondary_ui_pixel, btn)
+		btn.add_theme_stylebox_override("normal", entry["hover"] if hovered else entry["norm"])
+
+func _point_in_ui_rect(p: Vector2, btn: Button) -> bool:
+	if p.x < 0 or p.y < 0:
+		return false
+	var gp = btn.global_position
+	return p.x >= gp.x and p.x <= gp.x + btn.size.x \
+		and p.y >= gp.y and p.y <= gp.y + btn.size.y
 
 func handle_grab():
 	if not main.grabbed_node:

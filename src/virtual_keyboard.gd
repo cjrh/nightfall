@@ -12,6 +12,8 @@ var _kb_root: Control
 var _key_data: Array = []
 var _held_keys: Dictionary = {}
 var _held_keys_secondary: Dictionary = {}
+var _primary_hover_key: int = -1
+var _secondary_hover_key: int = -1
 var _shift_on: bool = false
 var _ctrl_on: bool = false
 var _alt_on: bool = false
@@ -91,7 +93,7 @@ func _build_keys():
 			var pressed = _make_key_style(Color(0.45, 0.5, 0.65, 1.0), Color(0.6, 0.65, 0.8, 1.0))
 			btn.add_theme_stylebox_override("pressed", pressed)
 			_kb_root.add_child(btn)
-			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", "")})
+			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", ""), "norm_style": norm, "hover_style": hover})
 			x += btn_w + gap
 	_apply_modifier_visuals()
 
@@ -211,7 +213,12 @@ func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 
 func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 	if not visible:
+		_primary_hover_key = -1
+		_apply_hover_states()
 		return
+
+	_primary_hover_key = _key_from_pos(pixel_pos)
+	_apply_hover_states()
 
 	if pixel_pos.x >= _kb_width:
 		if clicking and not was_clicking and not trackpad_active:
@@ -256,12 +263,32 @@ func handle_secondary_key(pixel_pos: Vector2, pressed: bool):
 	if key_code < 0:
 		return
 	if pressed:
-		_on_key_press(key_code)
-		_held_keys_secondary[key_code] = true
+		if key_code in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
+			_on_key_press(key_code)
+			if key_code != KEY_CAPSLOCK:
+				_held_keys_secondary[key_code] = true
+		else:
+			main.stream_backend.send_keyboard_event(key_code, 3, 0)
+			_held_keys_secondary[key_code] = true
 	else:
 		for kc in _held_keys_secondary.keys():
-			_on_key_release(kc)
+			if kc not in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
+				main.stream_backend.send_keyboard_event(kc, 4, 0)
 		_held_keys_secondary.clear()
+
+func handle_secondary_pointer(pixel_pos: Vector2):
+	if not visible:
+		_secondary_hover_key = -1
+		_apply_hover_states()
+		return
+	_secondary_hover_key = _key_from_pos(pixel_pos)
+	_apply_hover_states()
+
+func _apply_hover_states():
+	for kd in _key_data:
+		var key_code = kd["key"]
+		var hovered = (key_code == _primary_hover_key or key_code == _secondary_hover_key)
+		kd["btn"].add_theme_stylebox_override("normal", kd["hover_style"] if hovered else kd["norm_style"])
 
 func _set_tp_active_visual(active: bool):
 	var base_color = Color(0.25, 0.25, 0.35, 0.4)
@@ -414,7 +441,9 @@ func _apply_modifier_visuals():
 			continue
 		var bg = Color(0.35, 0.45, 0.6, 1.0) if is_on else Color(0.2, 0.2, 0.22, 0.9)
 		var border = Color(0.5, 0.6, 0.75, 1.0) if is_on else Color(0.35, 0.35, 0.38, 1.0)
-		btn.add_theme_stylebox_override("normal", _make_key_style(bg, border))
+		var style = _make_key_style(bg, border)
+		kd["norm_style"] = style
+		btn.add_theme_stylebox_override("normal", style)
 	var shifted = _shift_on or _caps_on
 	for kd in _key_data:
 		var shift_label = kd.get("s", "")

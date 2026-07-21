@@ -748,6 +748,7 @@ func _init_ui():
 
 	%IPInput.gui_input.connect(func(e): ui_controller.on_ipinput_gui_input(e))
 	ui_controller.setup_numpad()
+	ui_controller.refresh_ui_buttons()
 
 func _init_stream_backend():
 	if config_mgr and comp_mgr:
@@ -940,6 +941,7 @@ func _process(delta):
 	if not mouse_captured_by_stream:
 		xr_interaction.handle_pointer_interaction()
 	xr_interaction._process_other_hand_ui()
+	xr_interaction._apply_ui_hover_states()
 	xr_interaction.handle_scroll()
 	_update_cursor_layer()
 
@@ -1350,6 +1352,8 @@ func _apply_controller_textures(node: Node, is_left: bool):
 
 var contact_dot: MeshInstance3D
 var left_contact_dot: MeshInstance3D
+var contact_dot_ui: TextureRect
+var left_contact_dot_ui: TextureRect
 var pointer_cursor: MeshInstance3D
 
 func _create_contact_dot():
@@ -1359,6 +1363,13 @@ func _create_contact_dot():
 	left_contact_dot = _make_contact_dot()
 	left_contact_dot.name = "LeftContactDot"
 	add_child(left_contact_dot)
+
+	contact_dot_ui = _make_ui_dot()
+	contact_dot_ui.name = "ContactDotUI"
+	%UIRoot.add_child(contact_dot_ui)
+	left_contact_dot_ui = _make_ui_dot()
+	left_contact_dot_ui.name = "LeftContactDotUI"
+	%UIRoot.add_child(left_contact_dot_ui)
 
 	pointer_cursor = MeshInstance3D.new()
 	pointer_cursor.name = "PointerCursor"
@@ -1377,6 +1388,22 @@ func _create_contact_dot():
 	pointer_cursor.visible = false
 	pointer_cursor.extra_cull_margin = 10.0
 	add_child(pointer_cursor)
+
+func _make_ui_dot() -> TextureRect:
+	var dot = TextureRect.new()
+	dot.size = Vector2(12, 12)
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.visible = false
+	var img = Image.create(24, 24, false, Image.FORMAT_RGBA8)
+	var center = Vector2(12, 12)
+	for x in range(24):
+		for y in range(24):
+			var d = Vector2(x, y).distance_to(center)
+			img.set_pixel(x, y, Color(1, 1, 1, clampf(1.0 - d / 12.0, 0.0, 1.0) * 0.25))
+	dot.texture = ImageTexture.create_from_image(img)
+	dot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	dot.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	return dot
 
 func _make_contact_dot() -> MeshInstance3D:
 	var dot = MeshInstance3D.new()

@@ -84,6 +84,11 @@ func switch_tab(tab: int):
 	_tab_btn_display.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 0 else Color(1, 1, 1, 0.5))
 	_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 1 else Color(1, 1, 1, 0.5))
 
+	# Refresh stored styles for dual-hover tracking
+	var ui_buttons = []
+	_collect_buttons(main.get_node("%UIRoot"), ui_buttons)
+	main.xr_interaction.populate_ui_buttons(ui_buttons)
+
 func build_ui():
 	main.ui_panel_3d.mesh.size = main._ui_mesh_size
 	main.ui_viewport.size = main._ui_viewport_size
@@ -538,6 +543,10 @@ func build_ui():
 	update_ctrl_type_btn()
 	update_host_label()
 
+	var ui_buttons = []
+	_collect_buttons(root, ui_buttons)
+	main.xr_interaction.populate_ui_buttons(ui_buttons)
+
 func make_option_btn(label_text: String, value_text: String) -> Button:
 	var btn = Button.new()
 	btn.focus_mode = Control.FOCUS_NONE
@@ -553,6 +562,23 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	btn.custom_minimum_size = Vector2(250, 132)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return btn
+
+func _collect_buttons(node: Control, result: Array):
+	if node is Button:
+		var btn: Button = node
+		var norm = btn.get_theme_stylebox("normal")
+		var hover = btn.get_theme_stylebox("hover")
+		result.append({"btn": btn, "norm": norm, "hover": hover})
+	for i in range(node.get_child_count()):
+		var ch = node.get_child(i)
+		if ch is Control:
+			_collect_buttons(ch, result)
+
+func refresh_ui_buttons():
+	var root = main.get_node("%UIRoot")
+	var btns = []
+	_collect_buttons(root, btns)
+	main.xr_interaction.populate_ui_buttons(btns)
 
 func update_option_btn(btn: Button, value: String):
 	if btn == null:
