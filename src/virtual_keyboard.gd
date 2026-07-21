@@ -93,7 +93,7 @@ func _build_keys():
 			var pressed = _make_key_style(Color(0.45, 0.5, 0.65, 1.0), Color(0.6, 0.65, 0.8, 1.0))
 			btn.add_theme_stylebox_override("pressed", pressed)
 			_kb_root.add_child(btn)
-			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", ""), "norm_style": norm, "hover_style": hover})
+			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", ""), "norm_style": norm, "hover_style": hover, "last_style": norm})
 			x += btn_w + gap
 	_apply_modifier_visuals()
 
@@ -213,12 +213,15 @@ func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 
 func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 	if not visible:
-		_primary_hover_key = -1
-		_apply_hover_states()
+		if _primary_hover_key != -1:
+			_primary_hover_key = -1
+			_apply_hover_states()
 		return
 
-	_primary_hover_key = _key_from_pos(pixel_pos)
-	_apply_hover_states()
+	var new_key = _key_from_pos(pixel_pos)
+	if new_key != _primary_hover_key:
+		_primary_hover_key = new_key
+		_apply_hover_states()
 
 	if pixel_pos.x >= _kb_width:
 		if clicking and not was_clicking and not trackpad_active:
@@ -278,17 +281,23 @@ func handle_secondary_key(pixel_pos: Vector2, pressed: bool):
 
 func handle_secondary_pointer(pixel_pos: Vector2):
 	if not visible:
-		_secondary_hover_key = -1
-		_apply_hover_states()
+		if _secondary_hover_key != -1:
+			_secondary_hover_key = -1
+			_apply_hover_states()
 		return
-	_secondary_hover_key = _key_from_pos(pixel_pos)
-	_apply_hover_states()
+	var new_key = _key_from_pos(pixel_pos)
+	if new_key != _secondary_hover_key:
+		_secondary_hover_key = new_key
+		_apply_hover_states()
 
 func _apply_hover_states():
 	for kd in _key_data:
 		var key_code = kd["key"]
 		var hovered = (key_code == _primary_hover_key or key_code == _secondary_hover_key)
-		kd["btn"].add_theme_stylebox_override("normal", kd["hover_style"] if hovered else kd["norm_style"])
+		var use_style = kd["hover_style"] if hovered else kd["norm_style"]
+		if kd["last_style"] != use_style:
+			kd["last_style"] = use_style
+			kd["btn"].add_theme_stylebox_override("normal", use_style)
 
 func _set_tp_active_visual(active: bool):
 	var base_color = Color(0.25, 0.25, 0.35, 0.4)

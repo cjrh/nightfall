@@ -1352,24 +1352,22 @@ func _apply_controller_textures(node: Node, is_left: bool):
 
 var contact_dot: MeshInstance3D
 var left_contact_dot: MeshInstance3D
-var contact_dot_ui: TextureRect
-var left_contact_dot_ui: TextureRect
 var pointer_cursor: MeshInstance3D
 
 func _create_contact_dot():
-	contact_dot = _make_contact_dot()
+	var shared_mat = StandardMaterial3D.new()
+	shared_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shared_mat.albedo_color = Color(1, 1, 1, 0.2)
+	shared_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shared_mat.render_priority = 200
+	shared_mat.no_depth_test = true
+
+	contact_dot = _make_contact_dot(shared_mat)
 	contact_dot.name = "ContactDot"
 	add_child(contact_dot)
-	left_contact_dot = _make_contact_dot()
+	left_contact_dot = _make_contact_dot(shared_mat)
 	left_contact_dot.name = "LeftContactDot"
 	add_child(left_contact_dot)
-
-	contact_dot_ui = _make_ui_dot()
-	contact_dot_ui.name = "ContactDotUI"
-	%UIRoot.add_child(contact_dot_ui)
-	left_contact_dot_ui = _make_ui_dot()
-	left_contact_dot_ui.name = "LeftContactDotUI"
-	%UIRoot.add_child(left_contact_dot_ui)
 
 	pointer_cursor = MeshInstance3D.new()
 	pointer_cursor.name = "PointerCursor"
@@ -1389,34 +1387,12 @@ func _create_contact_dot():
 	pointer_cursor.extra_cull_margin = 10.0
 	add_child(pointer_cursor)
 
-func _make_ui_dot() -> TextureRect:
-	var dot = TextureRect.new()
-	dot.size = Vector2(12, 12)
-	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	dot.visible = false
-	var img = Image.create(24, 24, false, Image.FORMAT_RGBA8)
-	var center = Vector2(12, 12)
-	for x in range(24):
-		for y in range(24):
-			var d = Vector2(x, y).distance_to(center)
-			img.set_pixel(x, y, Color(1, 1, 1, clampf(1.0 - d / 12.0, 0.0, 1.0) * 0.25))
-	dot.texture = ImageTexture.create_from_image(img)
-	dot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	dot.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	return dot
-
-func _make_contact_dot() -> MeshInstance3D:
+func _make_contact_dot(mat: StandardMaterial3D = null) -> MeshInstance3D:
 	var dot = MeshInstance3D.new()
 	var m = SphereMesh.new()
 	m.radius = 0.015
 	m.height = 0.03
 	dot.mesh = m
-	var mat = StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1, 1, 1, 0.2)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.render_priority = 200
-	mat.no_depth_test = true
 	dot.material_override = mat
 	dot.visible = false
 	return dot
