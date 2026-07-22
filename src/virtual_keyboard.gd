@@ -262,6 +262,12 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool, hand
 func handle_secondary_key(pixel_pos: Vector2, pressed: bool):
 	if not visible:
 		return
+	var ev = InputEventMouseButton.new()
+	ev.position = pixel_pos
+	ev.global_position = pixel_pos
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = pressed
+	viewport.push_input(ev)
 	if not pressed:
 		for kc in _held_keys_secondary.keys():
 			if kc not in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:

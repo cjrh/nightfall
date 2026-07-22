@@ -419,13 +419,17 @@ func _update_cursor_layer():
 			_hide_all_stream_cursors()
 			var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
 			var to_cam = (xr_camera.global_position - hit_point).normalized()
+			var screen_dist = xr_camera.global_position.distance_to(screen_mesh.global_position)
+			var cursor_dist = xr_camera.global_position.distance_to(hit_point)
+			var dist_scale = cursor_dist / screen_dist
 			var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
 			var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
+			var cursor_size = 0.035 * dist_scale if on_screen else 0.035
 			if cursor_mode == 0:
 				if pointer: pointer.visible = false
 				if circle: circle.visible = true
 				comp_cursor_viewport.size = Vector2i(256, 256)
-				comp_cursor.set_quad_size(Vector2(0.035, 0.035))
+				comp_cursor.set_quad_size(Vector2(cursor_size, cursor_size))
 				comp_cursor.global_position = hit_point + surf_normal * 0.002
 				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 				comp_cursor.rotate_object_local(Vector3.UP, PI)
@@ -433,7 +437,7 @@ func _update_cursor_layer():
 				if pointer: pointer.visible = true
 				if circle: circle.visible = false
 				comp_cursor_viewport.size = Vector2i(40, 64)
-				comp_cursor.set_quad_size(Vector2(0.04, 0.064))
+				comp_cursor.set_quad_size(Vector2(0.04 * dist_scale, 0.064 * dist_scale))
 				comp_cursor.global_position = hit_point + surf_normal * 0.002
 				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 				comp_cursor.rotate_object_local(Vector3.UP, PI)

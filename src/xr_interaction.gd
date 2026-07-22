@@ -615,12 +615,13 @@ func _process_other_hand_ui():
 		main.left_comp_cursor.visible = true
 	if panel != main.ui_panel_3d and main.virtual_keyboard:
 		main.virtual_keyboard.handle_secondary_pointer(pixel_pos)
-	var motion = InputEventMouseMotion.new()
-	motion.position = pixel_pos
-	motion.global_position = pixel_pos
 	var hand = main.left_hand if other == "left" else main.right_hand
-	motion.button_mask = MOUSE_BUTTON_MASK_LEFT if (hand and hand.get_float("trigger") > 0.5) else 0
-	wv.push_input(motion)
+	if panel == main.ui_panel_3d and hand:
+		var motion = InputEventMouseMotion.new()
+		motion.position = pixel_pos
+		motion.global_position = pixel_pos
+		motion.button_mask = MOUSE_BUTTON_MASK_LEFT if (hand and hand.get_float("trigger") > 0.5) else 0
+		wv.push_input(motion)
 	if hand and hand.get_float("trigger") > 0.5:
 		if not _other_hand_clicking:
 			_other_hand_clicking = true
