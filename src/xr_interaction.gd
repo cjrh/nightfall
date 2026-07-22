@@ -16,10 +16,14 @@ var _auto_reset_timer: float = 0.0
 var _right_on_screen: bool = false
 var _left_on_screen: bool = false
 var _other_hand_clicking: bool = false
+var _secondary_press_viewport: SubViewport = null
+var _secondary_press_was_keyboard: bool = false
 var _right_inactive_time: float = 0.0
 var _left_inactive_time: float = 0.0
 var _last_known_right_pos: Vector3 = Vector3.ZERO
 var _last_known_left_pos: Vector3 = Vector3.ZERO
+var _last_known_right_rot: Vector3 = Vector3.ZERO
+var _last_known_left_rot: Vector3 = Vector3.ZERO
 
 var _primary_ui_pixel: Vector2 = Vector2(-1, -1)
 var _secondary_ui_pixel: Vector2 = Vector2(-1, -1)
@@ -523,6 +527,15 @@ func _update_on_screen_tracking():
 	_right_on_screen = _is_hand_on_screen("right")
 	_left_on_screen = _is_hand_on_screen("left")
 
+func process_pointer_frame(delta: float):
+	_update_active_hand()
+	_update_on_screen_tracking()
+	_process_auto_primary(delta)
+	if not main.mouse_captured_by_stream:
+		handle_pointer_interaction()
+	_process_other_hand_ui()
+	_apply_ui_hover_states()
+
 func _is_hand_on_screen(hand: String) -> bool:
 	var rc = main.hand_raycast if hand == "right" else main.left_hand_raycast
 	if not rc or not rc.is_colliding():
@@ -611,37 +624,39 @@ func _process_other_hand_ui():
 	if hand and hand.get_float("trigger") > 0.5:
 		if not _other_hand_clicking:
 			_other_hand_clicking = true
+			_secondary_press_viewport = wv
+			_secondary_press_was_keyboard = (main.virtual_keyboard and parent == main.virtual_keyboard.mesh_instance)
 			var btn = InputEventMouseButton.new()
 			btn.position = pixel_pos
 			btn.global_position = pixel_pos
 			btn.button_index = MOUSE_BUTTON_LEFT
 			btn.pressed = true
 			wv.push_input(btn)
-			if main.virtual_keyboard and parent == main.virtual_keyboard.mesh_instance:
+			if _secondary_press_was_keyboard:
 				main.virtual_keyboard.handle_secondary_key(pixel_pos, true)
 	elif _other_hand_clicking:
-		_other_hand_clicking = false
-		var btn = InputEventMouseButton.new()
-		btn.position = pixel_pos
-		btn.global_position = pixel_pos
-		btn.button_index = MOUSE_BUTTON_LEFT
-		btn.pressed = false
-		wv.push_input(btn)
-		if main.virtual_keyboard and parent == main.virtual_keyboard.mesh_instance:
-			main.virtual_keyboard.handle_secondary_key(pixel_pos, false)
+		_end_secondary_press(pixel_pos)
+
+func _end_secondary_press(pixel_pos := Vector2.ZERO):
+	if not _other_hand_clicking:
+		return
+	_other_hand_clicking = false
+	var btn = InputEventMouseButton.new()
+	btn.position = pixel_pos
+	btn.global_position = pixel_pos
+	btn.button_index = MOUSE_BUTTON_LEFT
+	btn.pressed = false
+	if is_instance_valid(_secondary_press_viewport):
+		_secondary_press_viewport.push_input(btn)
+	if _secondary_press_was_keyboard and main.virtual_keyboard:
+		main.virtual_keyboard.handle_secondary_key(pixel_pos, false)
+	_secondary_press_viewport = null
+	_secondary_press_was_keyboard = false
 
 func _hide_other_hand_ui():
 	_secondary_ui_pixel = Vector2(-1, -1)
 	if _other_hand_clicking:
-		_other_hand_clicking = false
-		var btn = InputEventMouseButton.new()
-		btn.button_index = MOUSE_BUTTON_LEFT
-		btn.pressed = false
-		if main.ui_panel_3d and main.ui_panel_3d.visible:
-			main.ui_viewport.push_input(btn)
-		if main.virtual_keyboard and main.virtual_keyboard.visible:
-			main.virtual_keyboard.handle_secondary_key(Vector2.ZERO, false)
-			main.virtual_keyboard.viewport.push_input(btn)
+		_end_secondary_press()
 	if main.virtual_keyboard:
 		main.virtual_keyboard.handle_secondary_pointer(Vector2(-1, -1))
 	if main.left_contact_dot:
@@ -656,7 +671,7 @@ func _apply_ui_hover_states():
 		return
 	for entry in _ui_button_states:
 		var btn: Button = entry["btn"]
-		if not btn.visible:
+		if not btn.is_visible_in_tree():
 			continue
 		var hovered = _point_in_ui_rect(_primary_ui_pixel, btn) or _point_in_ui_rect(_secondary_ui_pixel, btn)
 		var use_style = entry["hover"] if hovered else entry["norm"]

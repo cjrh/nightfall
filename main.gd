@@ -100,6 +100,7 @@ var stats_fps: float = 0.0
 var stats_frame_times: Array = []
 var stats_network_events: int = 0
 var passthrough_enabled: bool = false
+var passthrough_supported: bool = false
 var background_mode: int = 0
 var background_labels: Array = ["Black", "Starfield", "Ash", "Snow", "Data"]
 var bg_names: Array = ["Starfield", "Ash", "Snow", "Data"]
@@ -527,7 +528,7 @@ func _on_stream_started():
 		_ui_has_saved_offset = false
 		if comp_ui:
 			comp_ui.visible = false
-	if not passthrough_enabled:
+	if passthrough_enabled:
 		_hide_all_backgrounds()
 	var all_btn_flags = 0x1000|0x2000|0x4000|0x8000|0x0001|0x0002|0x0004|0x0008|0x0100|0x0200|0x0010|0x0020|0x0040|0x0080|0x0400
 	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
@@ -610,14 +611,7 @@ func _full_disconnect_cleanup(status_msg: String):
 	if comp_ui:
 		comp_ui.visible = false
 	welcome_screen.reset_connect_button()
-	if not passthrough_enabled:
-		if background_mode > 0:
-			var bg_idx = background_mode - 1
-			if bg_idx >= 0 and bg_idx < bg_names.size():
-				var bg = get_node_or_null(bg_names[bg_idx])
-				if bg:
-					bg.visible = true
-					bg.emitting = true
+	settings_controller.apply_passthrough(passthrough_enabled)
 	welcome_screen.update_welcome_info()
 	stream_manager.resize_stream_viewport(1920, 1080)
 
@@ -709,6 +703,8 @@ func _init_android_setup():
 		depth_estimator.setup()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		_load_controller_models()
+		_prepare_fade_materials("right")
+		_prepare_fade_materials("left")
 	sbs_mode = clampi(sbs_mode, 0, 2)
 	ai_3d_mode = clampi(ai_3d_mode, 0, 1)
 
@@ -824,13 +820,13 @@ func _init_xr(interface):
 	_log("[XR] Blend modes: %s" % str(interface.get_supported_environment_blend_modes()))
 
 	var blend_modes = interface.get_supported_environment_blend_modes()
-	var has_alpha_blend = false
+	passthrough_supported = false
 	for bm in blend_modes:
 		if bm == XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND:
-			has_alpha_blend = true
+			passthrough_supported = true
 			break
 
-	if has_alpha_blend:
+	if passthrough_supported:
 		get_viewport().transparent_bg = true
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 0)
@@ -865,9 +861,7 @@ func _init_post_xr():
 	if comp.available:
 		_switch_to_comp_layer()
 
-	if passthrough_enabled:
-		settings_controller.apply_passthrough(true)
-	settings_controller.apply_background(background_mode)
+	settings_controller.apply_passthrough(passthrough_enabled)
 
 	ui_visible = false
 	_set_ui_visible(false)
@@ -907,7 +901,13 @@ func _try_auto_connect():
 	if v2_cm:
 		var v2_hosts = v2_cm.get_hosts()
 		if v2_hosts.size() > 0:
-			var h = v2_hosts[0]
+			var h: Dictionary = {}
+			for candidate in v2_hosts:
+				if candidate.get("localaddress", "") == saved_ip:
+					h = candidate
+					break
+			if h.is_empty():
+				h = v2_hosts[0]
 			var host_ip = h.get("localaddress", "") if h.has("localaddress") else saved_ip
 			var host_id = h.get("id", -1) if h.has("id") else -1
 			if host_id != -1 and host_ip != "":
@@ -940,10 +940,7 @@ func _process(delta):
 
 	_process_input_release()
 
-	if not mouse_captured_by_stream:
-		xr_interaction.handle_pointer_interaction()
-	xr_interaction._process_other_hand_ui()
-	xr_interaction._apply_ui_hover_states()
+	xr_interaction.process_pointer_frame(delta)
 	xr_interaction.handle_scroll()
 	_update_cursor_layer()
 
@@ -980,19 +977,37 @@ func _process(delta):
 
 	_process_controller_fade(delta)
 
-func _process_controller_fade(delta: float):
-	if _is_using_hands or not is_xr_active:
+func _prepare_fade_materials(side: String):
+	var hand = right_hand if side == "right" else left_hand
+	if not hand:
 		return
-	if not _process_hand_fade(right_hand, "right", delta):
-		xr_interaction._right_inactive_time += delta
-	else:
-		xr_interaction._right_inactive_time = 0.0
-	if not _process_hand_fade(left_hand, "left", delta):
-		xr_interaction._left_inactive_time += delta
-	else:
-		xr_interaction._left_inactive_time = 0.0
+	_fade_materials[side].clear()
+	_collect_fade_materials(hand, _fade_materials[side])
 
-func _process_hand_fade(hand: XRController3D, side: String, delta: float) -> bool:
+func _collect_fade_materials(node: Node, result: Array):
+	for child in node.get_children():
+		if child is MeshInstance3D and child.name != "Laser":
+			var mi := child as MeshInstance3D
+			if mi.mesh:
+				for surface_idx in mi.mesh.get_surface_count():
+					var source := mi.get_active_material(surface_idx) as BaseMaterial3D
+					if source:
+						var material := source.duplicate() as BaseMaterial3D
+						material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+						mi.set_surface_override_material(surface_idx, material)
+						result.append(material)
+		_collect_fade_materials(child, result)
+
+func _set_hand_alpha(side: String, alpha: float):
+	if is_equal_approx(_hand_alpha[side], alpha):
+		return
+	_hand_alpha[side] = alpha
+	for material: BaseMaterial3D in _fade_materials[side]:
+		var c = material.albedo_color
+		c.a = alpha
+		material.albedo_color = c
+
+func _hand_has_activity(hand: XRController3D, side: String) -> bool:
 	if not hand:
 		return false
 	var pos = hand.global_position
@@ -1002,43 +1017,45 @@ func _process_hand_fade(hand: XRController3D, side: String, delta: float) -> boo
 		xr_interaction._last_known_right_pos = pos
 	else:
 		xr_interaction._last_known_left_pos = pos
-	var inactive_time = xr_interaction._right_inactive_time if side == "right" else xr_interaction._left_inactive_time
-	var is_active = inactive_time < 2.0
-	var target_alpha = 1.0 if is_active else 0.02
-	var current_alpha = _get_hand_material_alpha(hand)
-	var new_alpha = move_toward(current_alpha, target_alpha, delta * 2.0)
-	_set_hand_material_alpha(hand, new_alpha)
-	return moved
+	if moved:
+		return true
+	var rot = hand.global_rotation
+	var last_rot = xr_interaction._last_known_right_rot if side == "right" else xr_interaction._last_known_left_rot
+	if last_rot.distance_squared_to(rot) > 0.0001:
+		if side == "right":
+			xr_interaction._last_known_right_rot = rot
+		else:
+			xr_interaction._last_known_left_rot = rot
+		return true
+	if side == "right":
+		xr_interaction._last_known_right_rot = rot
+	else:
+		xr_interaction._last_known_left_rot = rot
+	if hand.get_float("trigger") > 0.1 or hand.get_float("grip") > 0.1:
+		return true
+	var vec = hand.get_vector2("primary")
+	if absf(vec.x) > 0.1 or absf(vec.y) > 0.1:
+		return true
+	return false
 
-func _get_hand_material_alpha(hand: XRController3D) -> float:
-	var a = _find_alpha_recursive(hand)
-	return a if a >= 0.0 else 1.0
+func _process_controller_fade(delta: float):
+	if _is_using_hands or not is_xr_active:
+		return
+	if _hand_has_activity(right_hand, "right"):
+		xr_interaction._right_inactive_time = 0.0
+	else:
+		xr_interaction._right_inactive_time += delta
+	if _hand_has_activity(left_hand, "left"):
+		xr_interaction._left_inactive_time = 0.0
+	else:
+		xr_interaction._left_inactive_time += delta
+	_apply_hand_fade("right", xr_interaction._right_inactive_time, delta)
+	_apply_hand_fade("left", xr_interaction._left_inactive_time, delta)
 
-func _find_alpha_recursive(node: Node) -> float:
-	for child in node.get_children():
-		if child is MeshInstance3D:
-			var mat = child.get_active_material(0)
-			if mat and mat is BaseMaterial3D:
-				return mat.albedo_color.a
-		var res = _find_alpha_recursive(child)
-		if res >= 0.0:
-			return res
-	return -1.0
-
-func _set_hand_material_alpha(hand: XRController3D, alpha: float):
-	_set_alpha_recursive(hand, alpha)
-
-func _set_alpha_recursive(node: Node, alpha: float):
-	for child in node.get_children():
-		if child is MeshInstance3D:
-			var mat = child.get_active_material(0)
-			if mat and mat is BaseMaterial3D:
-				if mat.albedo_color.a != alpha or mat.transparency != BaseMaterial3D.TRANSPARENCY_ALPHA:
-					var dup = mat.duplicate()
-					dup.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-					dup.albedo_color.a = alpha
-					child.material_override = dup
-		_set_alpha_recursive(child, alpha)
+func _apply_hand_fade(side: String, inactive_time: float, delta: float):
+	var target_alpha = 1.0 if inactive_time < 2.0 else 0.02
+	var new_alpha = move_toward(_hand_alpha[side], target_alpha, delta * 2.0)
+	_set_hand_alpha(side, new_alpha)
 
 func _process_hand_tracking(_delta):
 	var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
@@ -1356,6 +1373,8 @@ var contact_dot: MeshInstance3D
 var left_contact_dot: MeshInstance3D
 var pointer_cursor: MeshInstance3D
 var left_comp_cursor: MeshInstance3D
+var _fade_materials: Dictionary = {"left": [], "right": []}
+var _hand_alpha: Dictionary = {"left": 1.0, "right": 1.0}
 
 func _create_contact_dot():
 	var shared_mat = StandardMaterial3D.new()

@@ -160,7 +160,7 @@ func setup():
 	main.left_comp_cursor_viewport.disable_3d = true
 	main.left_comp_cursor_viewport.transparent_bg = true
 	main.left_comp_cursor_viewport.size = Vector2i(256, 256)
-	main.left_comp_cursor_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	main.left_comp_cursor_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	main.add_child(main.left_comp_cursor_viewport)
 
 	var left_circle = ColorRect.new()

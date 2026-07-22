@@ -67,10 +67,7 @@ func apply_stereo():
 	main.stream_backend.set_depth_model(1 if mode == 4 else 0)
 
 func toggle_passthrough():
-	if not main.is_xr_active:
-		return
-	var interface = XRServer.find_interface("OpenXR")
-	if not interface:
+	if not main.is_xr_active or not main.passthrough_supported:
 		return
 	main.passthrough_enabled = not main.passthrough_enabled
 	apply_passthrough(main.passthrough_enabled)

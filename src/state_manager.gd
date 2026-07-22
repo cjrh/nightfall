@@ -126,12 +126,17 @@ func load_state():
 
 	main.bezel_enabled = save.get_value("screen", "bezel", true)
 	main.curvature = save.get_value("screen", "curvature", 2)
-	main.passthrough_enabled = save.get_value("screen", "passthrough_enabled", false)
 	main.background_mode = save.get_value("screen", "background_mode", 0)
 	if save.has_section_key("screen", "passthrough"):
 		var old = clampi(save.get_value("screen", "passthrough", 0), 0, 5)
-		main.passthrough_enabled = (old == 0)
-		main.background_mode = maxi(old - 1, 0)
+		if main.passthrough_supported:
+			main.passthrough_enabled = (old == 0)
+			main.background_mode = maxi(old - 1, 0)
+		else:
+			main.passthrough_enabled = false
+			main.background_mode = old
+	else:
+		main.passthrough_enabled = save.get_value("screen", "passthrough_enabled", false) and main.passthrough_supported
 	main.smooth_mode = save.get_value("screen", "smooth_mode", save.get_value("screen", "render_mode", 0))
 	main.sharpen_mode = save.get_value("screen", "sharpen_mode", 0)
 	main.cursor_mode = save.get_value("screen", "cursor_mode", 1)

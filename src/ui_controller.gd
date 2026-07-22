@@ -566,8 +566,12 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 func _collect_buttons(node: Control, result: Array):
 	if node is Button:
 		var btn: Button = node
-		var norm = btn.get_theme_stylebox("normal")
+		var norm = btn.get_meta("dual_hover_norm", null)
+		if norm == null:
+			norm = btn.get_theme_stylebox("normal")
+			btn.set_meta("dual_hover_norm", norm)
 		var hover = btn.get_theme_stylebox("hover")
+		btn.set_meta("dual_hover_hover", hover)
 		result.append({"btn": btn, "norm": norm, "hover": hover})
 	for i in range(node.get_child_count()):
 		var ch = node.get_child(i)
