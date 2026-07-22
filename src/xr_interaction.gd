@@ -402,7 +402,8 @@ func handle_pointer_interaction():
 				main.set_comp_grab_bar_color(main.virtual_keyboard.viewport, Color(1, 1, 1, 0.08))
 
 			if not is_kb_grab:
-				main.virtual_keyboard.handle_pointer(pixel_pos, is_now_clicking, main.was_clicking)
+				var active_hand_node = main.left_hand if _active_hand == "left" else main.right_hand
+				main.virtual_keyboard.handle_pointer(pixel_pos, is_now_clicking, main.was_clicking, active_hand_node)
 				if is_now_clicking:
 					main.was_clicking = true
 				else:
@@ -574,13 +575,31 @@ func _process_other_hand_ui():
 
 	if panel == main.ui_panel_3d:
 		_secondary_ui_pixel = pixel_pos
+		if main.grabbed_node != main.ui_panel_3d:
+			var primary_on_grab = _primary_ui_pixel.x >= 0 and _is_ui_grab_bar(_primary_ui_pixel)
+			if not primary_on_grab:
+				var is_sec_grab_bar = _is_ui_grab_bar(pixel_pos)
+				main.set_comp_grab_bar_color(main.ui_viewport, Color(1, 1, 1, 0.25) if (is_sec_grab_bar and main.grabbed_corner_idx < 0) else Color(1, 1, 1, 0.08))
 	else:
 		_secondary_ui_pixel = Vector2(-1, -1)
 	var col_normal = rc.get_collision_normal()
 	var dot_offset = col_normal * 0.025 if col_normal != Vector3() else (main.xr_camera.global_position - hit_pos).normalized() * 0.025
 	if main.left_contact_dot:
-		main.left_contact_dot.global_position = hit_pos + dot_offset
-		main.left_contact_dot.visible = true
+		main.left_contact_dot.visible = false
+	if main.comp.in_use and main.left_comp_cursor_layer:
+		var to_cam = (main.xr_camera.global_position - hit_pos).normalized()
+		main.left_comp_cursor_layer.global_position = hit_pos + to_cam * 0.002
+		main.left_comp_cursor_layer.look_at(main.left_comp_cursor_layer.global_position + to_cam, Vector3.UP)
+		main.left_comp_cursor_layer.rotate_object_local(Vector3.UP, PI)
+		main.left_comp_cursor_layer.visible = true
+		if main.left_comp_cursor:
+			main.left_comp_cursor.visible = false
+	elif main.left_comp_cursor:
+		var to_cam = (main.xr_camera.global_position - hit_pos).normalized()
+		main.left_comp_cursor.global_position = hit_pos + to_cam * 0.002
+		main.left_comp_cursor.look_at(main.left_comp_cursor.global_position + to_cam, Vector3.UP)
+		main.left_comp_cursor.rotate_object_local(Vector3.UP, PI)
+		main.left_comp_cursor.visible = true
 	if panel != main.ui_panel_3d and main.virtual_keyboard:
 		main.virtual_keyboard.handle_secondary_pointer(pixel_pos)
 	var motion = InputEventMouseMotion.new()
@@ -627,6 +646,10 @@ func _hide_other_hand_ui():
 		main.virtual_keyboard.handle_secondary_pointer(Vector2(-1, -1))
 	if main.left_contact_dot:
 		main.left_contact_dot.visible = false
+	if main.left_comp_cursor:
+		main.left_comp_cursor.visible = false
+	if main.left_comp_cursor_layer:
+		main.left_comp_cursor_layer.visible = false
 
 func _apply_ui_hover_states():
 	if not main.ui_visible:

@@ -20,6 +20,7 @@ var _alt_on: bool = false
 var _caps_on: bool = false
 
 var trackpad_active: bool = false
+var _trackpad_hand: XRController3D = null
 var _last_hand_pos: Vector3 = Vector3.ZERO
 var _sensitivity: float = 20000.0
 var _dead_zone: float = 0.001
@@ -211,7 +212,7 @@ func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 	s.set_content_margin_all(4)
 	return s
 
-func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
+func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool, hand: XRController3D = null):
 	if not visible:
 		if _primary_hover_key != -1:
 			_primary_hover_key = -1
@@ -226,7 +227,8 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 	if pixel_pos.x >= _kb_width:
 		if clicking and not was_clicking and not trackpad_active:
 			trackpad_active = true
-			_last_hand_pos = main.right_hand.global_position
+			_trackpad_hand = hand if hand else main.right_hand
+			_last_hand_pos = _trackpad_hand.global_position
 			_set_tp_active_visual(true)
 			_update_tp_hint()
 		return
@@ -260,24 +262,24 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 func handle_secondary_key(pixel_pos: Vector2, pressed: bool):
 	if not visible:
 		return
+	if not pressed:
+		for kc in _held_keys_secondary.keys():
+			if kc not in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
+				main.stream_backend.send_keyboard_event(kc, 4, 0)
+		_held_keys_secondary.clear()
+		return
 	if pixel_pos.x >= _kb_width:
 		return
 	var key_code = _key_from_pos(pixel_pos)
 	if key_code < 0:
 		return
-	if pressed:
-		if key_code in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
-			_on_key_press(key_code)
-			if key_code != KEY_CAPSLOCK:
-				_held_keys_secondary[key_code] = true
-		else:
-			main.stream_backend.send_keyboard_event(key_code, 3, 0)
+	if key_code in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
+		_on_key_press(key_code)
+		if key_code != KEY_CAPSLOCK:
 			_held_keys_secondary[key_code] = true
 	else:
-		for kc in _held_keys_secondary.keys():
-			if kc not in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
-				main.stream_backend.send_keyboard_event(kc, 4, 0)
-		_held_keys_secondary.clear()
+		main.stream_backend.send_keyboard_event(key_code, 3, 0)
+		_held_keys_secondary[key_code] = true
 
 func handle_secondary_pointer(pixel_pos: Vector2):
 	if not visible:
@@ -324,16 +326,20 @@ func _process(_delta):
 	if not trackpad_active:
 		return
 
-	if main.right_hand:
-		var stick_click = main.right_hand.is_button_pressed("primary_click")
-		if stick_click and not _tp_was_stick_click:
-			_deactivate_trackpad()
-			thumbstick_exit_flag = true
-			_tp_was_stick_click = stick_click
-			return
-		_tp_was_stick_click = stick_click
+	var hand := _trackpad_hand
+	if not is_instance_valid(hand):
+		_deactivate_trackpad()
+		return
 
-	var trigger = main.right_hand.get_float("trigger") if main.right_hand else 0.0
+	var stick_click = hand.is_button_pressed("primary_click")
+	if stick_click and not _tp_was_stick_click:
+		_deactivate_trackpad()
+		thumbstick_exit_flag = true
+		_tp_was_stick_click = stick_click
+		return
+	_tp_was_stick_click = stick_click
+
+	var trigger = hand.get_float("trigger")
 	if trigger > 0.5 and not _tp_left_clicking:
 		main.stream_backend.send_mouse_button_event(7, 1)
 		_tp_left_clicking = true
@@ -341,9 +347,7 @@ func _process(_delta):
 		main.stream_backend.send_mouse_button_event(8, 1)
 		_tp_left_clicking = false
 
-	var gripping = false
-	if main.right_hand:
-		gripping = main.right_hand.is_button_pressed("grip_click") or main.right_hand.get_float("grip") > 0.5
+	var gripping = hand.is_button_pressed("grip_click") or hand.get_float("grip") > 0.5
 	if gripping and not _tp_right_clicking:
 		main.stream_backend.send_mouse_button_event(7, 3)
 		_tp_right_clicking = true
@@ -351,14 +355,13 @@ func _process(_delta):
 		main.stream_backend.send_mouse_button_event(8, 3)
 		_tp_right_clicking = false
 
-	if main.right_hand:
-		var stick_y = main.right_hand.get_vector2("primary").y
-		if absf(stick_y) > 0.4:
-			var clicks = int(stick_y * 0.8)
-			if clicks != 0:
-				main.stream_backend.send_scroll_event(clicks)
+	var stick_y = hand.get_vector2("primary").y
+	if absf(stick_y) > 0.4:
+		var clicks = int(stick_y * 0.8)
+		if clicks != 0:
+			main.stream_backend.send_scroll_event(clicks)
 
-	var hand_pos = main.right_hand.global_position
+	var hand_pos = hand.global_position
 	var delta_3d = hand_pos - _last_hand_pos
 
 	if delta_3d.length() < _dead_zone:
@@ -381,6 +384,7 @@ func _process(_delta):
 
 func _deactivate_trackpad():
 	trackpad_active = false
+	_trackpad_hand = null
 	_set_tp_active_visual(false)
 	if _tp_left_clicking:
 		main.stream_backend.send_mouse_button_event(8, 1)

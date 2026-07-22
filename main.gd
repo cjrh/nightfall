@@ -170,6 +170,8 @@ var comp_cursor: Node3D = null
 var comp_ui: Node3D = null
 var comp_kb: Node3D = null
 var comp_cursor_viewport: SubViewport = null
+var left_comp_cursor_layer: Node3D = null
+var left_comp_cursor_viewport: SubViewport = null
 var comp_layer: Node3D = null
 var comp_viewport: SubViewport = null
 var comp_yuv_rect: ColorRect = null
@@ -1353,6 +1355,7 @@ func _apply_controller_textures(node: Node, is_left: bool):
 var contact_dot: MeshInstance3D
 var left_contact_dot: MeshInstance3D
 var pointer_cursor: MeshInstance3D
+var left_comp_cursor: MeshInstance3D
 
 func _create_contact_dot():
 	var shared_mat = StandardMaterial3D.new()
@@ -1386,6 +1389,38 @@ func _create_contact_dot():
 	pointer_cursor.visible = false
 	pointer_cursor.extra_cull_margin = 10.0
 	add_child(pointer_cursor)
+
+	left_comp_cursor = _make_circle_cursor()
+	left_comp_cursor.name = "LeftCompCursor"
+	add_child(left_comp_cursor)
+
+func _make_circle_cursor() -> MeshInstance3D:
+	var m = MeshInstance3D.new()
+	var quad = QuadMesh.new()
+	quad.size = Vector2(0.035, 0.035)
+	m.mesh = quad
+	var tex_size = 64
+	var img = Image.create(tex_size, tex_size, false, Image.FORMAT_RGBA8)
+	var center = Vector2((tex_size - 1) * 0.5, (tex_size - 1) * 0.5)
+	var radius = tex_size * 0.42
+	var edge = max(tex_size * 0.015, 1.0)
+	for x in range(tex_size):
+		for y in range(tex_size):
+			var d = Vector2(x, y).distance_to(center)
+			var t = clampf((d - (radius - edge)) / edge, 0.0, 1.0)
+			var alpha = (1.0 - t) * 0.3
+			img.set_pixel(x, y, Color(1, 1, 1, alpha))
+	var mat = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_texture = ImageTexture.create_from_image(img)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = 127
+	mat.no_depth_test = true
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.material_override = mat
+	m.visible = false
+	m.extra_cull_margin = 10.0
+	return m
 
 func _make_contact_dot(mat: StandardMaterial3D = null) -> MeshInstance3D:
 	var dot = MeshInstance3D.new()
