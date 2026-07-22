@@ -3,9 +3,13 @@ extends Node
 
 enum CtrlType { GAMEPAD, KEYBOARD, KBMOUSE }
 enum BtnToggle { HEAD, TILT, NONE }
+enum PrimaryHand { RIGHT, LEFT, AUTO }
 
 var btn_toggle: int = BtnToggle.TILT
 var btn_toggle_labels: Array = ["Head", "Tilt", "None"]
+
+var primary_hand: int = PrimaryHand.RIGHT
+var primary_labels: Array = ["Right", "Left", "Auto"]
 
 var main: Node3D
 var active: bool = false
@@ -375,3 +379,10 @@ func cycle_btn_toggle():
 	if main.ui_controller:
 		main.ui_controller.update_btn_toggle_btn()
 	_log("[CTRL] Button toggle: " + btn_toggle_labels[btn_toggle])
+
+func cycle_primary_hand():
+	primary_hand = (primary_hand + 1) % 3
+	main.state_manager.save_state()
+	if main.ui_controller:
+		main.ui_controller.update_primary_btn()
+	_log("[CTRL] Primary hand: " + primary_labels[primary_hand])

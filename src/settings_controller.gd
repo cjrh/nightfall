@@ -67,36 +67,46 @@ func apply_stereo():
 	main.stream_backend.set_depth_model(1 if mode == 4 else 0)
 
 func toggle_passthrough():
+	if not main.is_xr_active or not main.passthrough_supported:
+		return
+	main.passthrough_enabled = not main.passthrough_enabled
+	apply_passthrough(main.passthrough_enabled)
+	_save_setting(main._ui_pt_btn, "On" if main.passthrough_enabled else "Off")
+
+func apply_passthrough(enable: bool):
 	if not main.is_xr_active:
 		return
+	_hide_all_backgrounds()
 	var interface = XRServer.find_interface("OpenXR")
 	if not interface:
 		return
-	main.passthrough_mode = (main.passthrough_mode + 1) % main.passthrough_labels.size()
-	main._log("[PT] mode=%d labels=%s" % [main.passthrough_mode, str(main.passthrough_labels.size())])
-	main._flush_log()
-	var has_alpha_blend = main.passthrough_labels.has("On")
-	_hide_all_backgrounds()
-	if has_alpha_blend and main.passthrough_mode == 0:
+	if enable:
 		main.get_viewport().transparent_bg = true
 		main.world_env.environment.background_mode = Environment.BG_COLOR
 		main.world_env.environment.background_color = Color(0, 0, 0, 0)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
-	elif (has_alpha_blend and main.passthrough_mode == 1) or (not has_alpha_blend and main.passthrough_mode == 0):
-		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
-		main.world_env.environment.background_color = Color(0, 0, 0, 1)
-		main.get_viewport().transparent_bg = false
 	else:
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
-		main.world_env.environment.background_color = Color(0, 0, 0, 0)
 		main.get_viewport().transparent_bg = false
-		var bg_idx = main.passthrough_mode - 2
+		apply_background(main.background_mode)
+
+func cycle_background():
+	main.background_mode = (main.background_mode + 1) % main.background_labels.size()
+	apply_background(main.background_mode)
+	_save_setting(main._ui_bg_btn, main.background_labels[main.background_mode])
+
+func apply_background(bg_mode: int):
+	if not main.is_xr_active or main.passthrough_enabled:
+		return
+	_hide_all_backgrounds()
+	main.world_env.environment.background_color = Color(0, 0, 0, 1 if bg_mode == 0 else 0)
+	if bg_mode > 0:
+		var bg_idx = bg_mode - 1
 		if bg_idx >= 0 and bg_idx < main.bg_names.size():
 			var bg = main.get_node_or_null(main.bg_names[bg_idx])
 			if bg:
 				bg.visible = true
 				bg.emitting = true
-	_save_setting(main._ui_pt_btn, main.passthrough_labels[main.passthrough_mode])
 
 func _hide_all_backgrounds():
 	for name in main.bg_names:
@@ -177,6 +187,10 @@ func cycle_auto_reconnect():
 	if main.stream_backend and main.stream_backend._v2:
 		main.stream_backend._v2.set_auto_reconnect(main.auto_reconnect_enabled)
 	_save_setting(main._ui_reconnect_btn, "On" if main.auto_reconnect_enabled else "Off")
+
+func cycle_quick_start():
+	main.quick_start_enabled = not main.quick_start_enabled
+	_save_setting(main._ui_quick_start_btn, "On" if main.quick_start_enabled else "Off")
 
 func cycle_idle_timeout():
 	var idx = idle_values.find(main.idle_timeout_min)

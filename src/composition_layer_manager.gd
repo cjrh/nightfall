@@ -146,6 +146,36 @@ func setup():
 	main.comp_cursor.set_layer_viewport(main.comp_cursor_viewport)
 	main._log("[COMP] Cursor composition layer created")
 
+	main.left_comp_cursor_layer = OpenXRCompositionLayerQuad.new()
+	main.left_comp_cursor_layer.name = "LeftCompCursorLayer"
+	main.left_comp_cursor_layer.set_sort_order(4)
+	main.left_comp_cursor_layer.set_enable_hole_punch(false)
+	main.left_comp_cursor_layer.set_alpha_blend(true)
+	main.left_comp_cursor_layer.set_quad_size(Vector2(0.035, 0.035))
+	main.left_comp_cursor_layer.visible = false
+	main.xr_origin.add_child(main.left_comp_cursor_layer)
+
+	main.left_comp_cursor_viewport = SubViewport.new()
+	main.left_comp_cursor_viewport.name = "LeftCompCursorViewport"
+	main.left_comp_cursor_viewport.disable_3d = true
+	main.left_comp_cursor_viewport.transparent_bg = true
+	main.left_comp_cursor_viewport.size = Vector2i(256, 256)
+	main.left_comp_cursor_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	main.add_child(main.left_comp_cursor_viewport)
+
+	var left_circle = ColorRect.new()
+	left_circle.name = "CircleTexture"
+	left_circle.anchors_preset = 15
+	left_circle.anchor_right = 1.0
+	left_circle.anchor_bottom = 1.0
+	var left_circle_mat = ShaderMaterial.new()
+	left_circle_mat.shader = preload("res://src/shaders/circle_cursor.gdshader")
+	left_circle.material = left_circle_mat
+	main.left_comp_cursor_viewport.add_child(left_circle)
+
+	main.left_comp_cursor_layer.set_layer_viewport(main.left_comp_cursor_viewport)
+	main._log("[COMP] Left cursor composition layer created")
+
 	main.comp_kb = OpenXRCompositionLayerQuad.new()
 	main.comp_kb.name = "CompKBLayer"
 	main.comp_kb.set_sort_order(2)
@@ -609,6 +639,7 @@ func switch_to_mesh_rendering():
 	if main.comp_ui: main.comp_ui.visible = false
 	if main.comp_kb: main.comp_kb.visible = false
 	if main.comp_cursor: main.comp_cursor.visible = false
+	if main.left_comp_cursor_layer: main.left_comp_cursor_layer.visible = false
 	if main.comp_viewport:
 		main.comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	if main.comp_viewport_left:
@@ -652,10 +683,12 @@ func clear_yuv_textures():
 static func set_grab_bar_color(viewport: SubViewport, color: Color):
 	if not viewport:
 		return
-	var bar = viewport.find_child("CompGrabBar", true, false)
-	if bar and bar is PanelContainer:
-		var style = bar.get_theme_stylebox("panel")
-		if style and style is StyleBoxFlat:
-			style = style.duplicate()
-			style.bg_color = Color(1, 1, 1, color.a)
-			bar.add_theme_stylebox_override("panel", style)
+	var bar = viewport.find_child("CompGrabBar", true, false) as PanelContainer
+	if not bar:
+		return
+	var style = bar.get_theme_stylebox("panel") as StyleBoxFlat
+	if not style or is_equal_approx(style.bg_color.a, color.a):
+		return
+	style = style.duplicate()
+	style.bg_color = Color(1, 1, 1, color.a)
+	bar.add_theme_stylebox_override("panel", style)

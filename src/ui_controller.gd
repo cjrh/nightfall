@@ -84,6 +84,11 @@ func switch_tab(tab: int):
 	_tab_btn_display.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 0 else Color(1, 1, 1, 0.5))
 	_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 1 else Color(1, 1, 1, 0.5))
 
+	# Refresh stored styles for dual-hover tracking
+	var ui_buttons = []
+	_collect_buttons(main.get_node("%UIRoot"), ui_buttons)
+	main.xr_interaction.populate_ui_buttons(ui_buttons)
+
 func build_ui():
 	main.ui_panel_3d.mesh.size = main._ui_mesh_size
 	main.ui_viewport.size = main._ui_viewport_size
@@ -359,6 +364,8 @@ func build_ui():
 	disp_row2.add_child(main._ui_sharpen_btn)
 	main._ui_render_btn = make_option_btn("Blur", "0%")
 	disp_row2.add_child(main._ui_render_btn)
+	main._ui_bg_btn = make_option_btn("Background", "Black")
+	disp_row2.add_child(main._ui_bg_btn)
 
 	_tab_stream = VBoxContainer.new()
 	_tab_stream.name = "TabStream"
@@ -403,6 +410,8 @@ func build_ui():
 	stream_row2.add_child(main._ui_reconnect_btn)
 	main._ui_idle_btn = make_option_btn("Idle Disconnect", "Off")
 	stream_row2.add_child(main._ui_idle_btn)
+	main._ui_quick_start_btn = make_option_btn("Quick Start", "Off")
+	stream_row2.add_child(main._ui_quick_start_btn)
 
 	_tab_control = VBoxContainer.new()
 	_tab_control.name = "TabControl"
@@ -449,6 +458,8 @@ func build_ui():
 	control_row2.add_child(main._ui_ctrl_type_btn)
 	main._ui_btn_toggle_btn = make_option_btn("Alternate Mode", "Head")
 	control_row2.add_child(main._ui_btn_toggle_btn)
+	main._ui_primary_btn = make_option_btn("Primary Hand", "Right")
+	control_row2.add_child(main._ui_primary_btn)
 
 	main._ui_status_label = Label.new()
 	main._ui_status_label.name = "StatusLabel"
@@ -504,6 +515,7 @@ func build_ui():
 	main._ui_disconnect_btn.visible = main.is_streaming
 	main._ui_pt_btn.button_down.connect(func(): main.settings_controller.toggle_passthrough())
 	main._ui_curve_btn.button_down.connect(func(): main.screen_manager.cycle_curvature())
+	main._ui_bg_btn.button_down.connect(func(): main.settings_controller.cycle_background())
 	main._ui_bezel_btn.button_down.connect(func(): main.screen_manager.toggle_bezel())
 	main._ui_hand_tracking_btn.button_down.connect(func(): main.settings_controller.toggle_hand_tracking())
 	main._ui_sbs_btn.button_down.connect(func(): on_sbs_toggled())
@@ -519,7 +531,9 @@ func build_ui():
 	main._ui_ctrl_mode_btn.button_down.connect(func(): main.controller_mapper.check_toggle_ui())
 	main._ui_ctrl_type_btn.button_down.connect(func(): main.controller_mapper.cycle_type())
 	main._ui_btn_toggle_btn.button_down.connect(func(): main.controller_mapper.cycle_btn_toggle())
+	main._ui_primary_btn.button_down.connect(func(): main.controller_mapper.cycle_primary_hand())
 	main._ui_reconnect_btn.button_down.connect(func(): main.settings_controller.cycle_auto_reconnect())
+	main._ui_quick_start_btn.button_down.connect(func(): main.settings_controller.cycle_quick_start())
 	main._ui_idle_btn.button_down.connect(func(): main.settings_controller.cycle_idle_timeout())
 	_tab_btn_display.button_down.connect(func(): switch_tab(0))
 	_tab_btn_stream.button_down.connect(func(): switch_tab(1))
@@ -528,6 +542,10 @@ func build_ui():
 	update_ctrl_mode_btn()
 	update_ctrl_type_btn()
 	update_host_label()
+
+	var ui_buttons = []
+	_collect_buttons(root, ui_buttons)
+	main.xr_interaction.populate_ui_buttons(ui_buttons)
 
 func make_option_btn(label_text: String, value_text: String) -> Button:
 	var btn = Button.new()
@@ -544,6 +562,27 @@ func make_option_btn(label_text: String, value_text: String) -> Button:
 	btn.custom_minimum_size = Vector2(250, 132)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return btn
+
+func _collect_buttons(node: Control, result: Array):
+	if node is Button:
+		var btn: Button = node
+		var norm = btn.get_meta("dual_hover_norm", null)
+		if norm == null:
+			norm = btn.get_theme_stylebox("normal")
+			btn.set_meta("dual_hover_norm", norm)
+		var hover = btn.get_theme_stylebox("hover")
+		btn.set_meta("dual_hover_hover", hover)
+		result.append({"btn": btn, "norm": norm, "hover": hover})
+	for i in range(node.get_child_count()):
+		var ch = node.get_child(i)
+		if ch is Control:
+			_collect_buttons(ch, result)
+
+func refresh_ui_buttons():
+	var root = main.get_node("%UIRoot")
+	var btns = []
+	_collect_buttons(root, btns)
+	main.xr_interaction.populate_ui_buttons(btns)
 
 func update_option_btn(btn: Button, value: String):
 	if btn == null:
@@ -570,6 +609,10 @@ func update_ctrl_type_btn():
 func update_btn_toggle_btn():
 	if main._ui_btn_toggle_btn and main.controller_mapper:
 		update_option_btn(main._ui_btn_toggle_btn, main.controller_mapper.btn_toggle_labels[main.controller_mapper.btn_toggle])
+
+func update_primary_btn():
+	if main._ui_primary_btn and main.controller_mapper:
+		update_option_btn(main._ui_primary_btn, main.controller_mapper.primary_labels[main.controller_mapper.primary_hand])
 
 func update_host_label():
 	if not main.is_streaming:

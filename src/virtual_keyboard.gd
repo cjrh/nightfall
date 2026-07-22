@@ -11,12 +11,16 @@ var _key_area_width := 1600
 var _kb_root: Control
 var _key_data: Array = []
 var _held_keys: Dictionary = {}
+var _held_keys_secondary: Dictionary = {}
+var _primary_hover_key: int = -1
+var _secondary_hover_key: int = -1
 var _shift_on: bool = false
 var _ctrl_on: bool = false
 var _alt_on: bool = false
 var _caps_on: bool = false
 
 var trackpad_active: bool = false
+var _trackpad_hand: XRController3D = null
 var _last_hand_pos: Vector3 = Vector3.ZERO
 var _sensitivity: float = 20000.0
 var _dead_zone: float = 0.001
@@ -90,7 +94,7 @@ func _build_keys():
 			var pressed = _make_key_style(Color(0.45, 0.5, 0.65, 1.0), Color(0.6, 0.65, 0.8, 1.0))
 			btn.add_theme_stylebox_override("pressed", pressed)
 			_kb_root.add_child(btn)
-			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", "")})
+			_key_data.append({"btn": btn, "key": key_data["k"], "mod": key_data.get("mod", ""), "l": key_data["l"], "s": key_data.get("s", ""), "norm_style": norm, "hover_style": hover, "last_style": norm})
 			x += btn_w + gap
 	_apply_modifier_visuals()
 
@@ -208,14 +212,23 @@ func _make_key_style(bg: Color, border: Color) -> StyleBoxFlat:
 	s.set_content_margin_all(4)
 	return s
 
-func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
+func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool, hand: XRController3D = null):
 	if not visible:
+		if _primary_hover_key != -1:
+			_primary_hover_key = -1
+			_apply_hover_states()
 		return
+
+	var new_key = _key_from_pos(pixel_pos)
+	if new_key != _primary_hover_key:
+		_primary_hover_key = new_key
+		_apply_hover_states()
 
 	if pixel_pos.x >= _kb_width:
 		if clicking and not was_clicking and not trackpad_active:
 			trackpad_active = true
-			_last_hand_pos = main.right_hand.global_position
+			_trackpad_hand = hand if hand else main.right_hand
+			_last_hand_pos = _trackpad_hand.global_position
 			_set_tp_active_visual(true)
 			_update_tp_hint()
 		return
@@ -246,6 +259,54 @@ func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
 			_on_key_release(kc)
 		_held_keys.clear()
 
+func handle_secondary_key(pixel_pos: Vector2, pressed: bool):
+	if not visible:
+		return
+	var ev = InputEventMouseButton.new()
+	ev.position = pixel_pos
+	ev.global_position = pixel_pos
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = pressed
+	viewport.push_input(ev)
+	if not pressed:
+		for kc in _held_keys_secondary.keys():
+			if kc not in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
+				main.stream_backend.send_keyboard_event(kc, 4, 0)
+		_held_keys_secondary.clear()
+		return
+	if pixel_pos.x >= _kb_width:
+		return
+	var key_code = _key_from_pos(pixel_pos)
+	if key_code < 0:
+		return
+	if key_code in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_CAPSLOCK]:
+		_on_key_press(key_code)
+		if key_code != KEY_CAPSLOCK:
+			_held_keys_secondary[key_code] = true
+	else:
+		main.stream_backend.send_keyboard_event(key_code, 3, 0)
+		_held_keys_secondary[key_code] = true
+
+func handle_secondary_pointer(pixel_pos: Vector2):
+	if not visible:
+		if _secondary_hover_key != -1:
+			_secondary_hover_key = -1
+			_apply_hover_states()
+		return
+	var new_key = _key_from_pos(pixel_pos)
+	if new_key != _secondary_hover_key:
+		_secondary_hover_key = new_key
+		_apply_hover_states()
+
+func _apply_hover_states():
+	for kd in _key_data:
+		var key_code = kd["key"]
+		var hovered = (key_code == _primary_hover_key or key_code == _secondary_hover_key)
+		var use_style = kd["hover_style"] if hovered else kd["norm_style"]
+		if kd["last_style"] != use_style:
+			kd["last_style"] = use_style
+			kd["btn"].add_theme_stylebox_override("normal", use_style)
+
 func _set_tp_active_visual(active: bool):
 	var base_color = Color(0.25, 0.25, 0.35, 0.4)
 	var active_color = Color(0.3, 0.6, 1.0, 0.9)
@@ -271,16 +332,20 @@ func _process(_delta):
 	if not trackpad_active:
 		return
 
-	if main.right_hand:
-		var stick_click = main.right_hand.is_button_pressed("primary_click")
-		if stick_click and not _tp_was_stick_click:
-			_deactivate_trackpad()
-			thumbstick_exit_flag = true
-			_tp_was_stick_click = stick_click
-			return
-		_tp_was_stick_click = stick_click
+	var hand := _trackpad_hand
+	if not is_instance_valid(hand):
+		_deactivate_trackpad()
+		return
 
-	var trigger = main.right_hand.get_float("trigger") if main.right_hand else 0.0
+	var stick_click = hand.is_button_pressed("primary_click")
+	if stick_click and not _tp_was_stick_click:
+		_deactivate_trackpad()
+		thumbstick_exit_flag = true
+		_tp_was_stick_click = stick_click
+		return
+	_tp_was_stick_click = stick_click
+
+	var trigger = hand.get_float("trigger")
 	if trigger > 0.5 and not _tp_left_clicking:
 		main.stream_backend.send_mouse_button_event(7, 1)
 		_tp_left_clicking = true
@@ -288,9 +353,7 @@ func _process(_delta):
 		main.stream_backend.send_mouse_button_event(8, 1)
 		_tp_left_clicking = false
 
-	var gripping = false
-	if main.right_hand:
-		gripping = main.right_hand.is_button_pressed("grip_click") or main.right_hand.get_float("grip") > 0.5
+	var gripping = hand.is_button_pressed("grip_click") or hand.get_float("grip") > 0.5
 	if gripping and not _tp_right_clicking:
 		main.stream_backend.send_mouse_button_event(7, 3)
 		_tp_right_clicking = true
@@ -298,14 +361,13 @@ func _process(_delta):
 		main.stream_backend.send_mouse_button_event(8, 3)
 		_tp_right_clicking = false
 
-	if main.right_hand:
-		var stick_y = main.right_hand.get_vector2("primary").y
-		if absf(stick_y) > 0.4:
-			var clicks = int(stick_y * 0.8)
-			if clicks != 0:
-				main.stream_backend.send_scroll_event(clicks)
+	var stick_y = hand.get_vector2("primary").y
+	if absf(stick_y) > 0.4:
+		var clicks = int(stick_y * 0.8)
+		if clicks != 0:
+			main.stream_backend.send_scroll_event(clicks)
 
-	var hand_pos = main.right_hand.global_position
+	var hand_pos = hand.global_position
 	var delta_3d = hand_pos - _last_hand_pos
 
 	if delta_3d.length() < _dead_zone:
@@ -328,6 +390,7 @@ func _process(_delta):
 
 func _deactivate_trackpad():
 	trackpad_active = false
+	_trackpad_hand = null
 	_set_tp_active_visual(false)
 	if _tp_left_clicking:
 		main.stream_backend.send_mouse_button_event(8, 1)
@@ -397,7 +460,9 @@ func _apply_modifier_visuals():
 			continue
 		var bg = Color(0.35, 0.45, 0.6, 1.0) if is_on else Color(0.2, 0.2, 0.22, 0.9)
 		var border = Color(0.5, 0.6, 0.75, 1.0) if is_on else Color(0.35, 0.35, 0.38, 1.0)
-		btn.add_theme_stylebox_override("normal", _make_key_style(bg, border))
+		var style = _make_key_style(bg, border)
+		kd["norm_style"] = style
+		btn.add_theme_stylebox_override("normal", style)
 	var shifted = _shift_on or _caps_on
 	for kd in _key_data:
 		var shift_label = kd.get("s", "")

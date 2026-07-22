@@ -55,6 +55,7 @@ var _pair_pin: String = ""
 var _connecting_ip: String = ""
 var _connect_timeout_pending: bool = false
 var _auto_connect: bool = false
+var quick_start_enabled: bool = false
 var _restarting_stream: bool = false
 var is_streaming: bool = false
 var sbs_mode: int = 0
@@ -98,8 +99,10 @@ var stats_timer: float = 0.0
 var stats_fps: float = 0.0
 var stats_frame_times: Array = []
 var stats_network_events: int = 0
-var passthrough_mode: int = 0
-var passthrough_labels: Array = ["On", "Off", "Starfield", "Ash", "Snow", "Data"]
+var passthrough_enabled: bool = false
+var passthrough_supported: bool = false
+var background_mode: int = 0
+var background_labels: Array = ["Black", "Starfield", "Ash", "Snow", "Data"]
 var bg_names: Array = ["Starfield", "Ash", "Snow", "Data"]
 var bg_offsets: Array = [Vector3.ZERO, Vector3.ZERO, Vector3(0, 10, 0), Vector3(0, -3, 0)]
 var ui_visible: bool = false
@@ -168,6 +171,8 @@ var comp_cursor: Node3D = null
 var comp_ui: Node3D = null
 var comp_kb: Node3D = null
 var comp_cursor_viewport: SubViewport = null
+var left_comp_cursor_layer: Node3D = null
+var left_comp_cursor_viewport: SubViewport = null
 var comp_layer: Node3D = null
 var comp_viewport: SubViewport = null
 var comp_yuv_rect: ColorRect = null
@@ -197,6 +202,7 @@ var _ui_mesh_size := Vector2(1.20, 0.58)
 var _ui_host_label: Label
 var _ui_status_label: Label
 var _ui_pt_btn: Button
+var _ui_bg_btn: Button
 var _ui_curve_btn: Button
 var _ui_bezel_btn: Button
 var _ui_hand_tracking_btn: Button
@@ -207,6 +213,8 @@ var _ui_fps_btn: Button
 var _ui_bitrate_btn: Button
 var _ui_ctrl_type_btn: Button
 var _ui_btn_toggle_btn: Button
+var _ui_primary_btn: Button
+var _ui_quick_start_btn: Button
 var _ui_render_btn: Button
 var _ui_sharpen_btn: Button
 var _ui_ctrl_mode_btn: Button
@@ -411,13 +419,17 @@ func _update_cursor_layer():
 			_hide_all_stream_cursors()
 			var surf_normal = _get_cylinder_normal_at(hit_point) if on_screen else (xr_camera.global_position - hit_point).normalized()
 			var to_cam = (xr_camera.global_position - hit_point).normalized()
+			var screen_dist = xr_camera.global_position.distance_to(screen_mesh.global_position)
+			var cursor_dist = xr_camera.global_position.distance_to(hit_point)
+			var dist_scale = cursor_dist / screen_dist
 			var pointer = comp_cursor_viewport.get_node_or_null("PointerTexture")
 			var circle = comp_cursor_viewport.get_node_or_null("CircleTexture")
+			var cursor_size = 0.035 * dist_scale if on_screen else 0.035
 			if cursor_mode == 0:
 				if pointer: pointer.visible = false
 				if circle: circle.visible = true
 				comp_cursor_viewport.size = Vector2i(256, 256)
-				comp_cursor.set_quad_size(Vector2(0.035, 0.035))
+				comp_cursor.set_quad_size(Vector2(cursor_size, cursor_size))
 				comp_cursor.global_position = hit_point + surf_normal * 0.002
 				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 				comp_cursor.rotate_object_local(Vector3.UP, PI)
@@ -425,7 +437,7 @@ func _update_cursor_layer():
 				if pointer: pointer.visible = true
 				if circle: circle.visible = false
 				comp_cursor_viewport.size = Vector2i(40, 64)
-				comp_cursor.set_quad_size(Vector2(0.04, 0.064))
+				comp_cursor.set_quad_size(Vector2(0.04 * dist_scale, 0.064 * dist_scale))
 				comp_cursor.global_position = hit_point + surf_normal * 0.002
 				comp_cursor.look_at(comp_cursor.global_position + to_cam, Vector3.UP)
 				comp_cursor.rotate_object_local(Vector3.UP, PI)
@@ -520,7 +532,7 @@ func _on_stream_started():
 		_ui_has_saved_offset = false
 		if comp_ui:
 			comp_ui.visible = false
-	if passthrough_mode < 2:
+	if passthrough_enabled:
 		_hide_all_backgrounds()
 	var all_btn_flags = 0x1000|0x2000|0x4000|0x8000|0x0001|0x0002|0x0004|0x0008|0x0100|0x0200|0x0010|0x0020|0x0040|0x0080|0x0400
 	stream_backend.send_controller_arrival(0, 1, 1, all_btn_flags, 0x01|0x02)
@@ -603,13 +615,7 @@ func _full_disconnect_cleanup(status_msg: String):
 	if comp_ui:
 		comp_ui.visible = false
 	welcome_screen.reset_connect_button()
-	if passthrough_mode >= 2:
-		var bg_idx = passthrough_mode - 2
-		if bg_idx >= 0 and bg_idx < bg_names.size():
-			var bg = get_node_or_null(bg_names[bg_idx])
-			if bg:
-				bg.visible = true
-				bg.emitting = true
+	settings_controller.apply_passthrough(passthrough_enabled)
 	welcome_screen.update_welcome_info()
 	stream_manager.resize_stream_viewport(1920, 1080)
 
@@ -667,7 +673,7 @@ func _ready():
 	_init_post_xr()
 	_init_textures_and_ui()
 
-	if _auto_connect:
+	if _auto_connect or quick_start_enabled:
 		_try_auto_connect()
 
 	Input.joy_connection_changed.connect(func(device, connected):
@@ -701,18 +707,29 @@ func _init_android_setup():
 		depth_estimator.setup()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		_load_controller_models()
+		_prepare_fade_materials("right")
+		_prepare_fade_materials("left")
 	sbs_mode = clampi(sbs_mode, 0, 2)
 	ai_3d_mode = clampi(ai_3d_mode, 0, 1)
 
 	if right_hand and left_hand:
 		var right_ray = right_hand.get_node_or_null("HandRayCast")
 		if right_ray:
+			var right_laser_node = right_ray.get_node_or_null("Laser")
+			if right_laser_node:
+				var tex = _make_laser_gradient()
+				if tex:
+					var mat = StandardMaterial3D.new()
+					mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					mat.albedo_color = Color(1, 1, 1, 0.5)
+					mat.albedo_texture = tex
+					mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					mat.render_priority = 127
+					mat.no_depth_test = true
+					right_laser_node.material_override = mat
 			left_hand_raycast = right_ray.duplicate()
 			left_hand_raycast.name = "LeftHandRayCast"
 			left_hand.add_child(left_hand_raycast)
-
-	if has_node("%Laser"):
-		get_node("%Laser").material_override.render_priority = 100
 
 	right_hand_visual = _create_hand_visualizer(false)
 	left_hand_visual = _create_hand_visualizer(true)
@@ -733,6 +750,7 @@ func _init_ui():
 
 	%IPInput.gui_input.connect(func(e): ui_controller.on_ipinput_gui_input(e))
 	ui_controller.setup_numpad()
+	ui_controller.refresh_ui_buttons()
 
 func _init_stream_backend():
 	if config_mgr and comp_mgr:
@@ -806,24 +824,21 @@ func _init_xr(interface):
 	_log("[XR] Blend modes: %s" % str(interface.get_supported_environment_blend_modes()))
 
 	var blend_modes = interface.get_supported_environment_blend_modes()
-	var has_alpha_blend = false
+	passthrough_supported = false
 	for bm in blend_modes:
 		if bm == XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND:
-			has_alpha_blend = true
+			passthrough_supported = true
 			break
 
-	if has_alpha_blend:
+	if passthrough_supported:
 		get_viewport().transparent_bg = true
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 0)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
-		passthrough_labels = ["On", "Off", "Starfield", "Ash", "Snow", "Data"]
 	else:
 		world_env.environment.background_mode = Environment.BG_COLOR
 		world_env.environment.background_color = Color(0, 0, 0, 1)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
-		passthrough_mode = 1
-		passthrough_labels = ["Off", "Starfield", "Ash", "Snow", "Data"]
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
@@ -835,7 +850,6 @@ func _init_xr(interface):
 	is_xr_active = true
 	sbs_mode = 0
 	ai_3d_mode = 0
-	passthrough_mode = 0
 
 	settings_controller.apply_display_refresh_rate()
 
@@ -851,11 +865,7 @@ func _init_post_xr():
 	if comp.available:
 		_switch_to_comp_layer()
 
-	if passthrough_mode > 0:
-		var saved_pt = passthrough_mode
-		passthrough_mode = 0
-		for i in range(saved_pt):
-			settings_controller.toggle_passthrough()
+	settings_controller.apply_passthrough(passthrough_enabled)
 
 	ui_visible = false
 	_set_ui_visible(false)
@@ -895,7 +905,13 @@ func _try_auto_connect():
 	if v2_cm:
 		var v2_hosts = v2_cm.get_hosts()
 		if v2_hosts.size() > 0:
-			var h = v2_hosts[0]
+			var h: Dictionary = {}
+			for candidate in v2_hosts:
+				if candidate.get("localaddress", "") == saved_ip:
+					h = candidate
+					break
+			if h.is_empty():
+				h = v2_hosts[0]
 			var host_ip = h.get("localaddress", "") if h.has("localaddress") else saved_ip
 			var host_id = h.get("id", -1) if h.has("id") else -1
 			if host_id != -1 and host_ip != "":
@@ -928,8 +944,7 @@ func _process(delta):
 
 	_process_input_release()
 
-	if not mouse_captured_by_stream:
-		xr_interaction.handle_pointer_interaction()
+	xr_interaction.process_pointer_frame(delta)
 	xr_interaction.handle_scroll()
 	_update_cursor_layer()
 
@@ -963,6 +978,88 @@ func _process(delta):
 			_startup_cover.queue_free()
 			_startup_cover = null
 			_log("[COVER] Startup cover removed")
+
+	_process_controller_fade(delta)
+
+func _prepare_fade_materials(side: String):
+	var hand = right_hand if side == "right" else left_hand
+	if not hand:
+		return
+	_fade_materials[side].clear()
+	_collect_fade_materials(hand, _fade_materials[side])
+
+func _collect_fade_materials(node: Node, result: Array):
+	for child in node.get_children():
+		if child is MeshInstance3D and child.name != "Laser":
+			var mi := child as MeshInstance3D
+			if mi.mesh:
+				for surface_idx in mi.mesh.get_surface_count():
+					var source := mi.get_active_material(surface_idx) as BaseMaterial3D
+					if source:
+						var material := source.duplicate() as BaseMaterial3D
+						material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+						mi.set_surface_override_material(surface_idx, material)
+						result.append(material)
+		_collect_fade_materials(child, result)
+
+func _set_hand_alpha(side: String, alpha: float):
+	if is_equal_approx(_hand_alpha[side], alpha):
+		return
+	_hand_alpha[side] = alpha
+	for material: BaseMaterial3D in _fade_materials[side]:
+		var c = material.albedo_color
+		c.a = alpha
+		material.albedo_color = c
+
+func _hand_has_activity(hand: XRController3D, side: String) -> bool:
+	if not hand:
+		return false
+	var pos = hand.global_position
+	var last_pos = xr_interaction._last_known_right_pos if side == "right" else xr_interaction._last_known_left_pos
+	var moved = last_pos.distance_squared_to(pos) > 0.00001
+	if side == "right":
+		xr_interaction._last_known_right_pos = pos
+	else:
+		xr_interaction._last_known_left_pos = pos
+	if moved:
+		return true
+	var rot = hand.global_rotation
+	var last_rot = xr_interaction._last_known_right_rot if side == "right" else xr_interaction._last_known_left_rot
+	if last_rot.distance_squared_to(rot) > 0.0001:
+		if side == "right":
+			xr_interaction._last_known_right_rot = rot
+		else:
+			xr_interaction._last_known_left_rot = rot
+		return true
+	if side == "right":
+		xr_interaction._last_known_right_rot = rot
+	else:
+		xr_interaction._last_known_left_rot = rot
+	if hand.get_float("trigger") > 0.1 or hand.get_float("grip") > 0.1:
+		return true
+	var vec = hand.get_vector2("primary")
+	if absf(vec.x) > 0.1 or absf(vec.y) > 0.1:
+		return true
+	return false
+
+func _process_controller_fade(delta: float):
+	if _is_using_hands or not is_xr_active:
+		return
+	if _hand_has_activity(right_hand, "right"):
+		xr_interaction._right_inactive_time = 0.0
+	else:
+		xr_interaction._right_inactive_time += delta
+	if _hand_has_activity(left_hand, "left"):
+		xr_interaction._left_inactive_time = 0.0
+	else:
+		xr_interaction._left_inactive_time += delta
+	_apply_hand_fade("right", xr_interaction._right_inactive_time, delta)
+	_apply_hand_fade("left", xr_interaction._left_inactive_time, delta)
+
+func _apply_hand_fade(side: String, inactive_time: float, delta: float):
+	var target_alpha = 1.0 if inactive_time < 2.0 else 0.02
+	var new_alpha = move_toward(_hand_alpha[side], target_alpha, delta * 2.0)
+	_set_hand_alpha(side, new_alpha)
 
 func _process_hand_tracking(_delta):
 	var hands_active = get_is_hand_tracking() and get_hand_tracking_has_data()
@@ -1267,32 +1364,36 @@ func _apply_controller_textures(node: Node, is_left: bool):
 				if mat is StandardMaterial3D:
 					mat = mat.duplicate()
 					mat.albedo_texture = base_tex
+					mat.render_priority = 127
 					child.set_surface_override_material(i, mat)
 				elif mat is BaseMaterial3D:
 					mat = mat.duplicate()
 					mat.albedo_texture = base_tex
+					mat.render_priority = 127
 					child.set_surface_override_material(i, mat)
 		_apply_controller_textures(child, is_left)
 
 var contact_dot: MeshInstance3D
+var left_contact_dot: MeshInstance3D
 var pointer_cursor: MeshInstance3D
+var left_comp_cursor: MeshInstance3D
+var _fade_materials: Dictionary = {"left": [], "right": []}
+var _hand_alpha: Dictionary = {"left": 1.0, "right": 1.0}
 
 func _create_contact_dot():
-	contact_dot = MeshInstance3D.new()
+	var shared_mat = StandardMaterial3D.new()
+	shared_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shared_mat.albedo_color = Color(1, 1, 1, 0.2)
+	shared_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shared_mat.render_priority = 200
+	shared_mat.no_depth_test = true
+
+	contact_dot = _make_contact_dot(shared_mat)
 	contact_dot.name = "ContactDot"
-	var dot_mesh = SphereMesh.new()
-	dot_mesh.radius = 0.01
-	dot_mesh.height = 0.02
-	contact_dot.mesh = dot_mesh
-	var dot_mat = StandardMaterial3D.new()
-	dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dot_mat.albedo_color = Color(1, 1, 1, 0.1)
-	dot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dot_mat.render_priority = 127
-	dot_mat.no_depth_test = true
-	contact_dot.material_override = dot_mat
-	contact_dot.visible = false
 	add_child(contact_dot)
+	left_contact_dot = _make_contact_dot(shared_mat)
+	left_contact_dot.name = "LeftContactDot"
+	add_child(left_contact_dot)
 
 	pointer_cursor = MeshInstance3D.new()
 	pointer_cursor.name = "PointerCursor"
@@ -1311,6 +1412,48 @@ func _create_contact_dot():
 	pointer_cursor.visible = false
 	pointer_cursor.extra_cull_margin = 10.0
 	add_child(pointer_cursor)
+
+	left_comp_cursor = _make_circle_cursor()
+	left_comp_cursor.name = "LeftCompCursor"
+	add_child(left_comp_cursor)
+
+func _make_circle_cursor() -> MeshInstance3D:
+	var m = MeshInstance3D.new()
+	var quad = QuadMesh.new()
+	quad.size = Vector2(0.035, 0.035)
+	m.mesh = quad
+	var tex_size = 64
+	var img = Image.create(tex_size, tex_size, false, Image.FORMAT_RGBA8)
+	var center = Vector2((tex_size - 1) * 0.5, (tex_size - 1) * 0.5)
+	var radius = tex_size * 0.42
+	var edge = max(tex_size * 0.015, 1.0)
+	for x in range(tex_size):
+		for y in range(tex_size):
+			var d = Vector2(x, y).distance_to(center)
+			var t = clampf((d - (radius - edge)) / edge, 0.0, 1.0)
+			var alpha = (1.0 - t) * 0.3
+			img.set_pixel(x, y, Color(1, 1, 1, alpha))
+	var mat = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_texture = ImageTexture.create_from_image(img)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = 127
+	mat.no_depth_test = true
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.material_override = mat
+	m.visible = false
+	m.extra_cull_margin = 10.0
+	return m
+
+func _make_contact_dot(mat: StandardMaterial3D = null) -> MeshInstance3D:
+	var dot = MeshInstance3D.new()
+	var m = SphereMesh.new()
+	m.radius = 0.015
+	m.height = 0.03
+	dot.mesh = m
+	dot.material_override = mat
+	dot.visible = false
+	return dot
 
 func _hide_all_backgrounds():
 	if bg_manager:
@@ -1440,3 +1583,10 @@ func _update_hand_tracker_transform(hand_node: XRController3D, tracker: XRHandTr
 			var t = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
 			t.basis = t.basis.rotated(t.basis.y, PI)
 			hand_node.transform = t
+
+func _make_laser_gradient() -> ImageTexture:
+	var img = Image.create(1, 256, false, Image.FORMAT_RGBA8)
+	for y in range(256):
+		var a = 1.0 - float(y) / 255.0
+		img.set_pixel(0, y, Color(1, 1, 1, a))
+	return ImageTexture.create_from_image(img)

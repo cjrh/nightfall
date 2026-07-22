@@ -10,6 +10,7 @@ var _border: PanelContainer
 var _bg: PanelContainer
 
 var trackpad_active: bool = false
+var _trackpad_hand: XRController3D = null
 var _last_hand_pos: Vector3 = Vector3.ZERO
 var _sensitivity: float = 20000.0
 var _dead_zone: float = 0.001
@@ -122,17 +123,19 @@ func _build_arrows():
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tp_root.add_child(hint)
 
-func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool):
+func handle_pointer(pixel_pos: Vector2, clicking: bool, was_clicking: bool, hand: XRController3D = null):
 	if not visible:
 		return
 
 	if clicking and not was_clicking:
 		trackpad_active = true
-		_last_hand_pos = main.right_hand.global_position
+		_trackpad_hand = hand if hand else main.right_hand
+		_last_hand_pos = _trackpad_hand.global_position
 		_set_active_visual(true)
 
 	if not clicking and was_clicking:
 		trackpad_active = false
+		_trackpad_hand = null
 		_set_active_visual(false)
 
 func _set_active_visual(active: bool):
@@ -142,17 +145,25 @@ func _process(_delta):
 	if not visible or not main.is_streaming:
 		if trackpad_active:
 			trackpad_active = false
+			_trackpad_hand = null
 			_set_active_visual(false)
 		return
 
 	if trackpad_active:
-		var trigger = main.right_hand.get_float("trigger") if main.right_hand else 0.0
+		var hand := _trackpad_hand
+		if not is_instance_valid(hand):
+			trackpad_active = false
+			_trackpad_hand = null
+			_set_active_visual(false)
+			return
+		var trigger = hand.get_float("trigger")
 		if trigger < 0.5:
 			trackpad_active = false
+			_trackpad_hand = null
 			_set_active_visual(false)
 			return
 
-		var hand_pos = main.right_hand.global_position
+		var hand_pos = hand.global_position
 		var delta_3d = hand_pos - _last_hand_pos
 
 		if delta_3d.length() < _dead_zone:
@@ -184,4 +195,5 @@ func _place_default():
 
 func _on_hide():
 	trackpad_active = false
+	_trackpad_hand = null
 	_set_active_visual(false)
