@@ -9,7 +9,7 @@ HttpRequester::HttpRequester() {
 
 HttpRequester::~HttpRequester() {}
 
-void HttpRequester::request(String url, String method, PackedByteArray body, Dictionary headers, Dictionary ssl_options, Callable callback) {
+void HttpRequester::request(String url, String method, PackedByteArray body, Dictionary headers, Dictionary ssl_options, Callable callback, int timeout_ms) {
     auto client = std::make_shared<nightfall::CurlHttpClient>();
 
     if (ssl_options.has("client_cert") && ssl_options.has("client_key")) {
@@ -33,7 +33,7 @@ void HttpRequester::request(String url, String method, PackedByteArray body, Dic
         client->set_server_cert_pin("");
     }
 
-    client->set_timeout_ms(15000);
+    client->set_timeout_ms(timeout_ms);
 
     std::thread([=]() {
         _perform_async(client, url, method, body, headers, ssl_options, callback);

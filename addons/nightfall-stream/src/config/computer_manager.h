@@ -58,8 +58,11 @@ private:
 
     Node *parent_node_ = nullptr;
 
+    uint64_t pair_start_time = 0;
+
     void _reset_pairing();
     void _step_pair();
+    void _schedule_retry(int step);
 
     PackedByteArray _generate_random_bytes(int size);
     String _bytes_to_hex(const PackedByteArray &bytes);

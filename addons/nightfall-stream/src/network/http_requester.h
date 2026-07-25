@@ -24,7 +24,7 @@ public:
     HttpRequester();
     ~HttpRequester();
 
-    void request(String url, String method, PackedByteArray body, Dictionary headers, Dictionary ssl_options, Callable callback);
+    void request(String url, String method, PackedByteArray body, Dictionary headers, Dictionary ssl_options, Callable callback, int timeout_ms = 15000);
 };
 
 } // namespace godot
